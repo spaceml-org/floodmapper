@@ -1,0 +1,55 @@
+{
+    "experiment_name": "WF2_unet_rbgiswirs",
+    "seed": 12,
+    "model_params": {
+        "model_folder": "models",
+        "model_version": "v2",
+        "hyperparameters": {
+            "max_tile_size": 256,
+            "metric_monitor": "val_bce_land_water",
+            "channel_configuration": "bgriswirs",
+            "weight_problem": [0.2, 0.8],
+            "pos_weight": [1.0, 10.0],
+            "label_names": [["invalid", "clear", "cloud"],
+                            ["invalid", "land", "water"]],
+            "model_type": "unet",
+            "num_classes": 2,
+            "max_epochs": 10,
+            "val_every": 1,
+            "lr": 1e-4,
+            "lr_decay": 0.5,
+            "lr_patience": 2,
+            "early_stopping_patience": 4
+        },
+        "train": true,
+        "test": false
+    },
+    "data_params": {
+        "loader_type": "local",
+        "num_workers": 4,
+        "filter_windows": {
+            "version" : "v2",
+            "threshold_clouds" : 0.8,
+            "apply" : true
+        },
+        "download": {
+            "train": false,
+            "val": false,
+            "test": false
+        },
+        "path_to_splits": "/worldfloods/worldfloods_extra_v2_0",
+        "train_test_split_file": "",
+	"input_folder": "S2",
+        "target_folder": "gt",
+        "batch_size": 32,
+        "window_size": [256, 256],
+        "channel_configuration": "bgriswirs",
+        "train_transformation": {
+            "normalize": true
+        },
+        "test_transformation": {
+            "normalize": true
+        }
+    }
+}
+
