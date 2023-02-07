@@ -6,7 +6,7 @@
 A brief history of ML4Floods and an illustrated outline of the system
 is available in the following slide deck:
 
-**Slides:** [[PDF]](documents/01_INTRODUCTION_SLIDES.pdf) [[GOOGLE SLIDES]](https://docs.google.com/presentation/d/10OT_3niuHoQtSTAqfsTcq6Yf6_gRgmSl_VUF4Z7iNbs/edit?usp=sharing)
+**Slides:** [[GOOGLE SLIDES]](https://docs.google.com/presentation/d/1_E0wAscHeM68X99P9Ivn2uYYC9n8dLTqmUD7HwMwMGM/edit?usp=sharing)
 
 
 ## Subsystems and Services

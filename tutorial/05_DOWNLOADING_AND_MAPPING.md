@@ -15,12 +15,9 @@ is setup correctly:
 ```
 # Execute in a terminal (assumes BASH shell)
 export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key/file/floodmapper-key.json"
-export GOOGLE_APPLICATION_CREDENTIALS="/Users/cpurcell/Documents/PROJECT_FLOODS/ML4Floods_DEVELOPMENT/ML4Floods_Enhanced/nema-floodmapper-2022.json"
-export GS_USER_PROJECT="nema-floodmapper"
-earthengine authenticate
+export GS_USER_PROJECT="FloodMapper-2023"
+earthengine authenticate # Not needed on GCP
 ```
-
-** TODO: RUN A CHECK ON CREDENTIAL ENV IN EACH SCRIPT**
 
 For this example, we will download images for the floods affecting
 Sydney and Newcastle during July 2022 - EMSR586. We previously
@@ -32,7 +29,8 @@ capture both e pre- and post-flood conditions.
 The download script ```01_download_images.py``` works by:
 
  * Convert a list of LGAs to small square 'patches' on a grid, via
-   a database look-up.
+   a database look-up. **OR**
+ * Read a list of processing patches saved to a GeoJSON file.
  * Query GEE for Sentinel-2 and Landsat data before and during the
    flooding event.
  * Determine cloud probability masks from archive data.
@@ -42,10 +40,10 @@ The download script ```01_download_images.py``` works by:
  * Track image download progress in the database.
  * Download the latest permanent water layers from GEE archive.
 
-To start the download process, execute the folloring in a terminal:
+To start the download process, execute the following in a terminal:
 
 ```
-# Query data and submit download tasks to GEE
+# Query data using a list of LGA names
 python 01_download_images.py \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
@@ -54,7 +52,17 @@ python 01_download_images.py \
     --lga-names "Port Stephens,Newcastle,Maitland"
 ```
 
-**TODO: Make a version that uses the gridded AoI file.**
+*OR*
+
+```
+# Query data by pointing to a saved AoI file
+python 01_download_images.py \
+    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --threshold-clouds-after 0.95 \
+    --threshold-invalids-after 0.7
+```
 
 The script will submit a list of tasks to GEE, which accomplishes most
 of the downloads in the background. After submitting all tasks, the
@@ -70,28 +78,29 @@ The status of the download tasks can be monitored by querying the
 database using the following notebook. The notebook requires a JSON
 file written by the download script shortly after starting.
 
-* [D1.4_monitoring_download_progress.ipynb](https://github.com/gonzmg88/NEMA-ml4floods/blob/cormac_devel/deliverables/D1.4_monitoring_download_progress.ipynb)
+* [05_Monitor_Downloads.ipynb](05_Monitor_Downloads.ipynb)
 
 
-## About the ML Model
+## About the ML Models
 
-- Developed in 2021 using the [ml4floods toolkit](https://github.com/spaceml-org/ml4floods)
-- Stored in [gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart](gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart)
-- Unet++ like architechtures with slight modifications to produce two independent segmentation masks, one for the clear/cloudy problem and another for water/land problem.
-- **Training data**: Training data from [WorldFloods dataset](https://www.nature.com/articles/s41598-021-86650-z/]) 
-- **Evaluation data**: Training data from [WorldFloods dataset](https://www.nature.com/articles/s41598-021-86650-z/])
+The current ML model was developed in 2021 using the [ML4Floods
+toolkit](https://github.com/spaceml-org/ml4floods). It has a UNet-like
+architechtures with slight modifications to produce two independent
+segmentation masks - one assessing cloudy/clear conditions and the
+other for classifying water/land. The model has been trained and
+evaluated on a recently developed *global* dataset of flooding imagery
+called
+[WorldFloods](https://www.nature.com/articles/s41598-021-86650-z/]).
 
-** Available Models: **
+There are currently two available public models:
 
-
-* **WF2_unet_rbgiswirs** 
-    - --model_path gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs: 
-    - Channel configuration is common bands of Sentinel-2 and Landsat, i.e. RGB, NIR and SWIR bands.
-    - Works in both Sentinel-2 and Landsat8/9. 
-* **WF2_unet_full_norm** --model_path gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_full_norm
-    - --model_path gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs: 
-    - Channel configuration are the 13 available bands of Sentinel-2
-    -  **Only** works on Sentinel-2 images.
+* **WF2_unet_rbgiswirs**
+  - Channel configuration is common bands of Sentinel-2 and Landsat (RGB,
+    NIR and SWIR bands).
+  - Can be applied to both Sentinel-2 and Landsat8/9 data.
+* **WF2_unet_full_norm**
+  - Channel configuration are the 13 available bands of Sentinel-2
+  - Only works on Sentinel-2 images.
 
 ** Metrics **
 
@@ -103,46 +112,89 @@ file written by the download script shortly after starting.
 | MNDWI           | 85.87                 | 80.56                    | 70.45              |
 
 
+Creating the flood map involves a series of steps after downloading
+the data. The following are the steps and significant parameters that
+affect the final output:
 
-
-Creating the flood map involves a series of steps after running the ML
-model in inference mode. The following are the steps and significant
-parameters that affect the final output:
-
- 1. Run the model on each grid image to create probability images of land, cloud and water.
- * No inference parameters, but model training details can be viewed in the config file.
- * gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs/config.json
- 1. Generate pixel masks of land, cloud and water by applying thresholds to the probability images.
- * Water Threshold supplied to the inference script (```--th_water```).
- * Brightness Threshold supplied to the inference script for cloud predictions (```--th_brightness```).
+ 1. Run the model on each grid image to create probability images of
+    land, cloud and water.
+    * No inference parameters, but model training details can be viewed
+      in the config file at ```WF2_unet_rbgiswirs/config.json```.
+ 1. Generate pixel masks of land, cloud and water by applying
+  thresholds to the probability images.
+    * Water Threshold supplied to the inference script (```--th_water```).
+    * Brightness Threshold supplied to the inference script for cloud
+    predictions (```--th_brightness```).
  1. Collapse time-series of images in each grid into a single image.
  1. Vectorise the pixel masks into polygons.
  1. Perform a spatial merge on the polygons to generate larger images.
 
 
-
 ## Starting the Mapping Task
 
+The mapping 'inference' task can be started using the following
+command-line argument, which must be run on each satellite separately:
+
 ```
-# Mapping the Sentinel-2 data for NEMA002 session
+# Mapping using the Sentinel-2 data
 python 02_run_inference.py \
-    --path-aois gs://ml4floods_nema/0_DEV/1_Staging/operational/NEMA002/aois.geojson \
-    --flood-start-date 2022-10-12 \
-    --flood-end-date 2022-11-10 \
-    --model-path gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
+    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
     --max-tile-size 128 \
     --collection-name S2 \
     --distinguish-flood-traces \
-    --device-name mps \
+    --device-name cuda \
     --overwrite
 ```
+
+Now we must run the task again for the LandSat data:
+
+
+```
+# Mapping using the Landsat data
+python 02_run_inference.py \
+    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
+    --max-tile-size 128 \
+    --collection-name S2 \
+    --distinguish-flood-traces \
+    --device-name cuda \
+    --overwrite
+```
+
+At this point, each valid grid position contains raster maps of water
+and cloud probability, alongside vectorised versions of these that
+have been created by applying a threshold operations. Each satellite
+overpass gives rise to a map, meaning that there may be a time-series
+of maps for each grid patch - depending on how many times teh
+satellites passed over.
 
 
 ## Running the Post-Processing Steps
 
+During post-processing the system runs through each grid position and
+constructs a 'best' flooding map from the time-series of data. These
+are then merged into a single file using a spatial disolve operartion.
+
+The following command is used to perform the merge:
+
 ```
 # Merging the mapping data
-python scripts/postprocessing_prepostflood.py \
+python 03_run_postprocessing.py \
+    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --session-code EMSR586 \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --preflood-start-date 2022-07-01 \
+    --preflood-end-date 2022-07-24 \
+    
+    
+
+
     --model_output_folder gs://ml4cc_data_lake/0_DEV/1_Staging/operational/VAL001/*/WF2_unet_rbgiswirs_vec \
     --flooding_date_post_start 2022-05-03 \
     --flooding_date_post_end 2022-05-15 \
