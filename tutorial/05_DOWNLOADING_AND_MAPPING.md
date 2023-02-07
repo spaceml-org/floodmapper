@@ -45,8 +45,8 @@ To start the download process, execute the following in a terminal:
 ```
 # Query data using a list of LGA names
 python 01_download_images.py \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
+    --post-flood-date-from 2022-07-01 \
+    --post-flood-date-to 2022-07-24 \
     --threshold-clouds-after 0.95 \
     --threshold-invalids-after 0.7 \
     --lga-names "Port Stephens,Newcastle,Maitland"
@@ -58,8 +58,8 @@ python 01_download_images.py \
 # Query data by pointing to a saved AoI file
 python 01_download_images.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
+    --post-flood-date-from 2022-07-01 \
+    --post-flood-date-to 2022-07-24 \
     --threshold-clouds-after 0.95 \
     --threshold-invalids-after 0.7
 ```
@@ -139,8 +139,8 @@ command-line argument, which must be run on each satellite separately:
 # Mapping using the Sentinel-2 data
 python 02_run_inference.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
+    --post-flood-date-from 2022-07-01 \
+    --post-flood-date-to 2022-07-24 \
     --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
     --max-tile-size 128 \
     --collection-name S2 \
@@ -156,8 +156,8 @@ Now we must run the task again for the LandSat data:
 # Mapping using the Landsat data
 python 02_run_inference.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
+    --post-flood-date-from 2022-07-01 \
+    --post-flood-date-to 2022-07-24 \
     --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
     --max-tile-size 128 \
     --collection-name S2 \
@@ -187,17 +187,9 @@ The following command is used to perform the merge:
 python 03_run_postprocessing.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
     --session-code EMSR586 \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
-    --preflood-start-date 2022-07-01 \
-    --preflood-end-date 2022-07-24 \
-    
-    
-
-
-    --model_output_folder gs://ml4cc_data_lake/0_DEV/1_Staging/operational/VAL001/*/WF2_unet_rbgiswirs_vec \
-    --flooding_date_post_start 2022-05-03 \
-    --flooding_date_post_end 2022-05-15 \
-    --flooding_date_pre 2022-04-30
+    --post-flood-date-from 2022-07-01 \
+    --post-flood-date-to 2022-07-24 \
+    --pre-flood-date-from 2022-07-01 \
+    --pre-flood-date-to 2022-07-24
 ```
 

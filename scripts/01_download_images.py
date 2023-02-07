@@ -667,9 +667,9 @@ if __name__ == '__main__':
         help="Path to GeoJSON containing grided AoIs.")
     req.add_argument('--lga-names', default = "",
         help="Comma separated string of LGA names.")
-    ap.add_argument('--flood-start-date', required=True,
+    ap.add_argument('--post-flood-date-from', required=True,
         help="Start date of the flooding event (YYYY-mm-dd)")
-    ap.add_argument('--flood-end-date', required=True,
+    ap.add_argument('--post-flood-date-to', required=True,
         help="End date of the flooding event (YYYY-mm-dd)")
     ap.add_argument('--timezone', default="UTC",
         help="Timezone [UTC].")
@@ -705,9 +705,9 @@ if __name__ == '__main__':
     # Parse the flood date range
     timezone_dates = timezone.utc if args.timezone == "UTC" \
         else ZoneInfo(args.timezone)
-    _start = datetime.strptime(args.flood_start_date, "%Y-%m-%d")\
+    _start = datetime.strptime(args.post_flood_date_from, "%Y-%m-%d")\
                               .replace(tzinfo=timezone_dates)
-    _end = datetime.strptime(args.flood_end_date, "%Y-%m-%d")\
+    _end = datetime.strptime(args.post_flood_date_to, "%Y-%m-%d")\
                                .replace(tzinfo=timezone_dates)
     flood_start_date, flood_end_date = sorted([_start, _end])
 
