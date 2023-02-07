@@ -488,9 +488,9 @@ if __name__ == "__main__":
 
     ap.add_argument("--path-aois", default="",
         help="Path to GeoJSON containing grided AoIs.")
-    ap.add_argument('--flood-start-date', required=True,
+    ap.add_argument('--post-flood-date-from', required=True,
         help="Start date of the flooding event (YYYY-mm-dd)")
-    ap.add_argument('--flood-end-date', required=True,
+    ap.add_argument('--post-flood-date-to', required=True,
         help="End date of the flooding event (YYYY-mm-dd)")
     ap.add_argument("--model-path",
         default="gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs",
@@ -526,8 +526,8 @@ if __name__ == "__main__":
                 f"Run with --device-name cpu")
 
     main(path_aois=args.path_aois,
-         flood_start_date=args.flood_start_date,
-         flood_end_date= args.flood_end_date,
+         flood_start_date=args.post_flood_date_from,
+         flood_end_date= args.post_flood_date_to,
          model_path=args.model_path,
          device_name=args.device_name,
          output_folder=args.output_folder,
