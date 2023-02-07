@@ -42,26 +42,18 @@ The download script ```01_download_images.py``` works by:
 
 To start the download process, execute the following in a terminal:
 
-```
-# Query data using a list of LGA names
-python 01_download_images.py \
-    --post-flood-date-from 2022-07-01 \
-    --post-flood-date-to 2022-07-24 \
-    --threshold-clouds-after 0.95 \
-    --threshold-invalids-after 0.7 \
-    --lga-names "Port Stephens,Newcastle,Maitland"
-```
-
-*OR*
 
 ```
 # Query data by pointing to a saved AoI file
 python 01_download_images.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --post-flood-date-from 2022-07-01 \
-    --post-flood-date-to 2022-07-24 \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --preflood-start-date 2022-06-15 \
+    --preflood-end-date 2022-06-20 \
     --threshold-clouds-after 0.95 \
-    --threshold-invalids-after 0.7
+    --threshold-invalids-after 0.7 \
+    --bucket_path gs://floodmapper-test/0_DEV/1_Staging/GRID
 ```
 
 The script will submit a list of tasks to GEE, which accomplishes most
@@ -139,13 +131,12 @@ command-line argument, which must be run on each satellite separately:
 # Mapping using the Sentinel-2 data
 python 02_run_inference.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --post-flood-date-from 2022-07-01 \
-    --post-flood-date-to 2022-07-24 \
+    --start-date 2022-06-15 \
+    --end-date 2022-07-24 \
     --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
     --max-tile-size 128 \
     --collection-name S2 \
     --distinguish-flood-traces \
-    --device-name cuda \
     --overwrite
 ```
 
@@ -156,13 +147,12 @@ Now we must run the task again for the LandSat data:
 # Mapping using the Landsat data
 python 02_run_inference.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --post-flood-date-from 2022-07-01 \
-    --post-flood-date-to 2022-07-24 \
+    --start-date 2022-06-15 \
+    --end-date 2022-07-24 \
     --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
     --max-tile-size 128 \
     --collection-name S2 \
     --distinguish-flood-traces \
-    --device-name cuda \
     --overwrite
 ```
 
@@ -187,9 +177,15 @@ The following command is used to perform the merge:
 python 03_run_postprocessing.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
     --session-code EMSR586 \
-    --post-flood-date-from 2022-07-01 \
-    --post-flood-date-to 2022-07-24 \
-    --pre-flood-date-from 2022-07-01 \
-    --pre-flood-date-to 2022-07-24
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --preflood-start-date 2022-06-15 \
+    --preflood-end-date 2022-06-20 \
+    --grid-folder gs://floodmapper-test/0_DEV/1_Staging/GRID \
+    --session-base-path gs://floodmapper-test/0_DEV/1_Staging/operational
 ```
+
+After the script has completed, the final map will be available on the
+GCP bucket under the ```operational/<SESSION_NAME>``` folder.
+
 

@@ -103,16 +103,16 @@ def fix_landsat_gee_id(row):
 def main(path_aois: str,
          flood_start_date: datetime,
          flood_end_date: datetime,
+         pre_flood_start_date: datetime,
+         pre_flood_end_date: datetime,
          lga_names: str,
          threshold_clouds_before: float,
          threshold_clouds_after: float,
          threshold_invalids_before: float,
          threshold_invalids_after: float,
-         days_before: int,
          collection_placeholder: str = "S2",
          only_one_previous: bool = False,
          channel_configuration:str = "bgriswirs",
-         margin_pre_search: int = 0,
          force_s2cloudless: bool = True,
          bucket_path: str = "gs://ml4floods_nema/0_DEV/1_Staging/GRID/",
          grid_name_filter: str = ""):
@@ -129,6 +129,10 @@ def main(path_aois: str,
     period_flood_start = flood_start_date
     period_flood_end = flood_end_date
 
+    # Set the pre-flood start and end times
+    period_pre_flood_end = pre_flood_end_date
+    period_pre_flood_start = pre_flood_start_date
+    
     # Connect to the FloodMapper DB
     db_conn = DB()
 
@@ -667,10 +671,15 @@ if __name__ == '__main__':
         help="Path to GeoJSON containing grided AoIs.")
     req.add_argument('--lga-names', default = "",
         help="Comma separated string of LGA names.")
-    ap.add_argument('--post-flood-date-from', required=True,
+    ap.add_argument('--flood-start-date', required=True,
         help="Start date of the flooding event (YYYY-mm-dd)")
-    ap.add_argument('--post-flood-date-to', required=True,
+    ap.add_argument('--flood-end-date', required=True,
         help="End date of the flooding event (YYYY-mm-dd)")
+    ap.add_argument('--preflood-start-date', required=True,
+        help="Start date of the unflooded time range (YYYY-mm-dd).")
+    ap.add_argument('--preflood-end-date', required=True,
+        help="End date of the unflooded time range (YYYY-mm-dd).")
+    
     ap.add_argument('--timezone', default="UTC",
         help="Timezone [UTC].")
     ap.add_argument('--threshold-clouds-before', default=.1, type=float,
@@ -684,10 +693,6 @@ if __name__ == '__main__':
     ap.add_argument("--channel-configuration",
         default="rgbiswirs", choices=["rgbiswirs", "all"],
         help="Channel configuration requested [%(default)s].")
-    ap.add_argument('--days-before', default=20, type=int,
-        help="Days before flood to search for images [%(default)s].")
-    ap.add_argument('--margin-pre-search', default=0, type=int,
-        help="Buffer days before flood to exclude from search [%(default)s].")
     ap.add_argument("--collection-name",
         choices=["Landsat", "S2", "all"], default="all",
         help="GEE collection to download data from [%(default)s]")
@@ -705,24 +710,31 @@ if __name__ == '__main__':
     # Parse the flood date range
     timezone_dates = timezone.utc if args.timezone == "UTC" \
         else ZoneInfo(args.timezone)
-    _start = datetime.strptime(args.post_flood_date_from, "%Y-%m-%d")\
+    _start = datetime.strptime(args.flood_start_date, "%Y-%m-%d")\
                               .replace(tzinfo=timezone_dates)
-    _end = datetime.strptime(args.post_flood_date_to, "%Y-%m-%d")\
+    _end = datetime.strptime(args.flood_end_date, "%Y-%m-%d")\
                                .replace(tzinfo=timezone_dates)
     flood_start_date, flood_end_date = sorted([_start, _end])
+
+    # Parse the unflooded date range
+    _start = datetime.strptime(args.preflood_start_date, "%Y-%m-%d")\
+                              .replace(tzinfo=timezone_dates)
+    _end = datetime.strptime(args.preflood_end_date, "%Y-%m-%d")\
+                               .replace(tzinfo=timezone_dates)
+    preflood_start_date, preflood_end_date = sorted([_start, _end])
 
     main(path_aois=args.path_aois,
          lga_names=args.lga_names,
          flood_start_date=flood_start_date,
          flood_end_date=flood_end_date,
+         pre_flood_start_date=preflood_start_date,
+         pre_flood_end_date=preflood_end_date,
          threshold_clouds_before=args.threshold_clouds_before,
          threshold_clouds_after=args.threshold_clouds_after,
          threshold_invalids_before=args.threshold_invalids_before,
          threshold_invalids_after=args.threshold_invalids_after,
-         days_before=args.days_before,
          collection_placeholder=args.collection_name,
          bucket_path=args.bucket_path,
          only_one_previous=args.only_one_previous,
          force_s2cloudless=not args.noforce_s2cloudless,
-         margin_pre_search=args.margin_pre_search,
          grid_name_filter=args.grid_name)

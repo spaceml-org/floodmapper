@@ -252,12 +252,11 @@ def vectorize_outputv1(prediction: np.ndarray,
 
 
 @torch.no_grad()
-def main(flood_start_date: str,
-         flood_end_date: str,
+def main(start_date: str,
+         end_date: str,
          path_aois: str,
          model_path: str,
          device_name: str,
-         output_folder: Optional[str]=None,
          max_tile_size: int = 1024,
          th_brightness: float = create_gt.BRIGHTNESS_THRESHOLD,
          th_water: float = .5,
@@ -276,8 +275,8 @@ def main(flood_start_date: str,
         session_data['collection_name'] = collection_name
         session_data['distinguish_flood_traces'] = distinguish_flood_traces
         session_data['device_name'] = device_name
-        session_data['date_start'] = flood_start_date
-        session_data['date_end'] = flood_end_date
+        session_data['date_start'] = start_date
+        session_data['date_end'] = end_date
         session_data['th_water'] = th_water
         session_data['th_brightness'] = th_brightness
         session_data['output_folder'] = output_folder
@@ -316,8 +315,8 @@ def main(flood_start_date: str,
     img_query = (f"SELECT * FROM images_download "
                  f"WHERE satellite = '{collection_name}' "
                  f"AND name in {tuple(aois_list)} "
-                 f"AND date >= '{flood_start_date}' "
-                 f"AND date <= '{flood_end_date}'")
+                 f"AND date >= '{start_date}' "
+                 f"AND date <= '{end_date}'")
     df = db_conn.run_query(img_query, fetch = True)
 
     # Format the path to the images
@@ -488,15 +487,13 @@ if __name__ == "__main__":
 
     ap.add_argument("--path-aois", default="",
         help="Path to GeoJSON containing grided AoIs.")
-    ap.add_argument('--post-flood-date-from', required=True,
-        help="Start date of the flooding event (YYYY-mm-dd)")
-    ap.add_argument('--post-flood-date-to', required=True,
-        help="End date of the flooding event (YYYY-mm-dd)")
+    ap.add_argument("--start-date", required=True,
+        help="Date to start inference (YYYY-mm-dd)")
+    ap.add_argument("--end-date", required=True,
+        help="Date to finish inference (YYYY-mm-dd)")
     ap.add_argument("--model-path",
         default="gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs",
         help="Path to folder containing model.pt and config.json file.")
-    ap.add_argument("--output-folder", default=None,
-        help="Folder where to save the results [under model folder]."),
     ap.add_argument("--max-tile-size", type=int, default=1_024,
         help="Maximum size of the processing tiles in NN [%(default)s].")
     ap.add_argument('--overwrite', default=False, action='store_true',
@@ -526,11 +523,10 @@ if __name__ == "__main__":
                 f"Run with --device-name cpu")
 
     main(path_aois=args.path_aois,
-         flood_start_date=args.post_flood_date_from,
-         flood_end_date= args.post_flood_date_to,
+         start_date=args.start_date,
+         end_date= args.post_flood_date_to,
          model_path=args.model_path,
          device_name=args.device_name,
-         output_folder=args.output_folder,
          max_tile_size=args.max_tile_size,
          th_water=args.th_water,
          overwrite=args.overwrite,

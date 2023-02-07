@@ -52,7 +52,8 @@ def spatial_check_exist(filename, mode, db_conn):
     return True
 
 
-def main(path_aois,session_path:str,
+def main(path_aois,
+         session_path:str,
          pre_flood_start_date:datetime,
          pre_flood_end_date:datetime,
          flood_start_date:datetime,
@@ -78,7 +79,7 @@ def main(path_aois,session_path:str,
 
     # Connect to the FloodMapper DB
     db_conn = DB()
-
+    
     fssession = utils.get_filesystem(session_path)
     fs = utils.get_filesystem(grid_folder)
 
@@ -485,13 +486,13 @@ if __name__ == "__main__":
         help="Path to GeoJSON containing grided AoIs.")
     ap.add_argument('--session-code', required=True,
         help="Mapping session code (e.g, EMSR586).")
-    ap.add_argument('--post-flood-date-from', required=True,
+    ap.add_argument('--flood-start-date', required=True,
         help="Start date of the flooding event (YYYY-mm-dd).")
-    ap.add_argument('--post-flood-date-to', required=True,
+    ap.add_argument('--flood-end-date', required=True,
         help="End date of the flooding event (YYYY-mm-dd).")
-    ap.add_argument('--pre-flood-date-from', required=False,
+    ap.add_argument('--preflood-start-date', required=True,
         help="Start date of the unflooded time range (YYYY-mm-dd).")
-    ap.add_argument('--pre-flood-date-to', required=True,
+    ap.add_argument('--preflood-end-date', required=True,
         help="End date of the unflooded time range (YYYY-mm-dd).")
     ap.add_argument("--grid_folder",
         default="gs://ml4floods_nema/0_DEV/1_Staging/GRID",
@@ -514,31 +515,23 @@ if __name__ == "__main__":
     # Parse the flood date range
     timezone_dates = timezone.utc if args.timezone == "UTC" \
         else ZoneInfo(args.timezone)
-    flood_start_date = datetime.strptime(args.flood_start_date, "%Y-%m-%d")
-    _start = datetime.strptime(args.post_flood_date_from, "%Y-%m-%d")\
+    _start = datetime.strptime(args.flood_start_date, "%Y-%m-%d")\
                               .replace(tzinfo=timezone_dates)
-    _end = datetime.strptime(args.post_flood_date_to, "%Y-%m-%d")\
+    _end = datetime.strptime(args.flood_end_date, "%Y-%m-%d")\
                                .replace(tzinfo=timezone_dates)
     flood_start_date, flood_end_date = sorted([_start, _end])
 
     # Parse the unflooded date range
-    if not args.pre_flood_date_to:
-        pre_flood_end_date = flood_start_date - timedelta(days=1)
-    else:
-        pre_flood_end_date = \
-            datetime.strptime(args.pre_flood_date_to, "%Y-%m-%d")\
-                    .replace(tzinfo=timezone_dates)
-    if not args.pre_flood_date_from:
-        pre_flood_start_date = pre_flood_end_date - timedelta(days=4*30)
-    else:
-        pre_flood_start_date = \
-            datetime.strptime(args.pre_flood_date_from, "%Y-%m-%d")\
-                    .replace(tzinfo=timezone_dates)
+    _start = datetime.strptime(args.preflood_start_date, "%Y-%m-%d")\
+                              .replace(tzinfo=timezone_dates)
+    _end = datetime.strptime(args.preflood_end_date, "%Y-%m-%d")\
+                               .replace(tzinfo=timezone_dates)
+    preflood_start_date, preflood_end_date = sorted([_start, _end])
 
     main(path_aois=args.path_aois,
          session_path=os.path.join(args.session_base_path, args.session_code),
-         pre_flood_start_date=pre_flood_start_date,
-         pre_flood_end_date=pre_flood_end_date,
+         pre_flood_start_date=preflood_start_date,
+         pre_flood_end_date=preflood_end_date,
          flood_start_date=flood_start_date,
          flood_end_date=flood_end_date,
          collection_name=args.collection_name,
