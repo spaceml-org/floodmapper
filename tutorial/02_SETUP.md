@@ -121,7 +121,7 @@ Buckets](https://console.cloud.google.com/storage/browser) page.
 1. Click **Create Bucket**.
 
 1. On the Create a Bucket page, enter your bucket information.
-   * Enter a name like 'nema-floodmapper'.
+   * Enter a name like 'floodmapper-bucket'.
    * Select a **Location Type** and **Location** where the bucket data
    will be permanently stored (e.g., Region -> Sydney).
    * Select a default **Storage Class** for the bucket, or select **Autoclass**
@@ -132,6 +132,20 @@ Buckets](https://console.cloud.google.com/storage/browser) page.
 
 We will initialise the directory structure in the bucket after
 installing the FloodMapper system on the processing machine.
+
+
+### Creating the Processing Machine
+
+ML4Floods and FloodMapper are designed to run on a computer with
+machine learning accelerator (e.g., GPU, TPU etc). The core requirement
+is a Python environment capable of running the PyTorch machine
+learning framework.
+
+The processing machine can be a local computer with a UNIX-like
+operating system (e.g., Linux or MacOS), but it is convenient to
+create a dedicated a virtual machine (VM) on GCP.
+
+ * Instructions are here: [02a_SETUP_VM](02a_SETUP_VM.md)
 
 
 ### Creating the FloodMapper Database and User Account
@@ -209,14 +223,15 @@ and click **SQL** in the left menu.
 
 1. Enter a database name and click **Create** (e.g., floodmapper-db).
 
-You can connect to the postgres instance using `psql`. If you do not
-have `psql` setup, you can find instructions for your Operating System
-[HERE](https://www.timescale.com/blog/how-to-install-psql-on-mac-ubuntu-debian-windows/).
+You can connect to the postgres instance using `psql`, which we
+installed on our Processing Machine earlier.
+
 
 On Google Cloud SQL, select the instance you just created, and you
-should be able to see the Public IP address of your instance. Copy
-that, and on a local terminal, type the following command. Ensure that
-your local IP address is whitelisted.
+should be able to see the Public IP address of your instance. Take
+note of the IP address and open a SSH terminal to your processing VM
+(ensure that your local IP address is whitelisted). Connect to the
+database by issuing this command:
 
 ```
 # Command format
@@ -226,16 +241,16 @@ psql -h <PUBLIC_IP_ADDRESS> -U <USERNAME> -d <DATABASE NAME>
 psql -h 34.116.119.139 -U postgres -d floodmapper-db
 ```
 
-You can connect and manage postgres through a DB Client as well such
-  as [DBeaver](https://dbeaver.io/) and PgAdmin.
+You can also connect and manage the database through a client such as
+  [DBeaver](https://dbeaver.io/) and PgAdmin.
 
 
-## Configuring and Initialising the Database
+### Configuring and Initialising the Database
 
 The FloodMapper database is configured to use the PostGIS extensions
 that enable native use of 'geometry' data. To enable PostGIS for GCP
 PostgreSQL, you need to login to the database using ```psql``` and
-execute the command:
+execute the following command:
 
 ```
 # Enable GIS extensions
@@ -243,8 +258,8 @@ CREATE EXTENSION postgis;
 ```
 
 We need to create empty tables in the database. Use ```psql``` to
-login to the database from withing the tutorial folder and execute the
-following:
+login to the database from withing the ```tutorial``` folder and
+execute the following:
 
 ```
 # Connect to the floodmapper-db
@@ -293,100 +308,15 @@ login to an existing Google account. After logging in, a token
 will be saved to disk, which will automate subsequent GEE access.
 
 
-## Set up the Processing Machine
-
-ML4Floods and FloodMapper are designed to run on a computer with
-machine learning accelerator (e.g., GPU, TPU etc). The core requirement
-is a Python environment capable of running the PyTorch machine
-learning framework.
-
-For convenience, we provide a GCP-compatible virtual machine image
-pre-configured with the necessary environment. However, you can also
-choose to run the processing on your own Linux machine by following
-the installation instructions below.
-
-
-### Creating a virtual machine on GCP
-
- 1. Navigate to the [VM Instance](https://console.cloud.google.com/compute/instances) page under the Compute Engine sescion of GCP Console.
-
- 1. Click the **Create Insance** button in the top bar.
-
- 1. Give the instance a name like 'flood-processor'.
-
- 1. Add 'created-by', 'creation-date' and 'contact' labels.
-
- 1. Choose a nearby Region (e.g., australia-southeast1) and Zone
- (e.g., australia-southeast1-a).
-
- 1. Under Machine Configuration, click **GPU** and choose a NVIDIA T4 x1.
-
- 1. Under 'Machine Type' Choose a machine with >= 15 GB memory
-
- 1. Under 'Boot Disk' change the OS to Ubuntu 20.04 LTS, x86.
-
- 1. Click **Allow Full Access ...**.
-
- 1. Accept the default service account.
-
- 1. Click **Create**. The new VM will be created and started - you can
- see from the green tick-mark on the 'VM Instances' page.
-
-From the VM Instances page, you can start and stop (pause) the VM,
-configure the system and much more.
-
-
-
-### Installing the Python Environment
-
- 1. Download and install miniconda from [this
- link](https://docs.conda.io/en/latest/miniconda.html).
-
- 1. Create a new MiniConda Python environment by executing the
- following command:
-     ```
-     conda env create -f floodmapper.yml -n floodmapper
-     ```
-     This downloads the necessary Python packages and installs them to
-     a new environment called 'floodmapper'. The file 'floodmapper.yml'
-     specifies the packages to be downloaded.
-     
- 1. Activate the new environment and register the kernel with Jupyter:
-     ```
-     # Activate the environment
-     conda activate floodmapper
-
-     # Register with Jupyter
-     python -m ipykernel install --user --name floodmapper \
-     --display-name "Python 3.9 (floodmapper)"
-     ```
- 1. Install the ML4Floods package:
-     ```
-     # Clone ml4floods locally
-     git clone https://github.com/spaceml-org/ml4floods/
-
-     # Run the installer
-     cd ml4floods 
-     python setup.py install
-     ```
-     
-
-
-### Install the FloodMapper System
-
-The FloodMapper system builds on the functionality in the standard
-ML4Floods package. To install, we will clone the repo from GitHub
-
-```
-git clone 
-```
-
 
 ### Set up Credential Information
 
 In the FloodMapper system, login credentials and project information
 are stored in a hidden ```.env``` file that is used to load
-environment variables. This file contains the following entries:
+environment variables. By convention, this file lives in the
+FloodMapper installation directory (e.g.,
+```/user/jupyter/floodmapper``` on our GCP VM). The file contains the
+following entries:
 
 ```
 # Database access credentials
@@ -400,7 +330,7 @@ GOOGLE_APPLICATION_CREDENTIALS="/path/to/gcp/key/floodmapper-key.json"
 GS_USER_PROJECT="NEMA-FloodMapper"
 
 # Base directory of FloodMapper installation
-ML4FLOODS_BASE_DIR="/path/to/floodmapper/installation/NEMA-ml4floods"
+ML4FLOODS_BASE_DIR="/path/to/floodmapper"
 ```
 
 Replace the defaults with your own information.
@@ -413,6 +343,7 @@ imagery, and output products. The following notebook shows how to
 initialise the bucket:
 
  * [02a_Setup_GCP_Bucket.ipynb](02a_Setup_GCP_Bucket.ipynb)
+
 
 ### Initialising the Database
 

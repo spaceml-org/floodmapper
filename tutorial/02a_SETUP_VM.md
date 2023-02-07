@@ -37,8 +37,39 @@ sudo apt install postgresql-client
 This terminal window also has convenient buttons to upload and
 download files directly to the VM.
 
+At this point we will download a copy of the FloodMapper repo, so we
+can setup the Python environment. Execute the following in the
+terminal:
+
+ 1. Download the FloodMapper repo from Github:
+     ```
+     # Fetch the FloodMapper code
+     git clone https://github.com/spaceml-org/floodmapper.git
+     ```
+
+ 1. Create a new Python environment to run the code:
+     ```
+     cd floodmapper/tutorial
+     conda env create -f floodmapper.yml -n floodmapper
+     ```
+
+ 1. Activate the new environment as a test:
+     ```
+     # Activate the environment
+     conda activate floodmapper
+     ```
+
+Note: if you ever need to update the conda environment with new
+packages, simply edit the ```floodmapper.yml``` file and run the
+following command in the SSH terminal:
+
+```
+conda env update --name floodmapper --file floodmapper.yml --prune
+```
+
+
 However, most of our interaction with the processing machine will be
-through [Jupyter Lab](https://jupyter.org/).
+through [Jupyter Lab](https://jupyter.org/), which we will start now.
 
 
 ## Accessing your VM through Jupyter Lab
@@ -61,29 +92,27 @@ user account home directory, but a shared jupyter one for anyone that
 accesses the notebook. We will do all of our processing in this
 folder.
 
- 
-## Installing the FloodMapper system
+## Registering the FloodMapper environment
 
-Now we can setup and install the FloodMapper system from JupyterLab.
+We can let JupyterLab know about our new Python ```floodmapper```
+environment by registering the new processing kernel.
 
- 1. Download the FloodMapper repo from Github:
-     ```
-     # Fetch the FloodMapper code
-     git clone https://github.com/spaceml-org/floodmapper.git
-     ```
 
- 1. Create a new Python environment to run the code:
-     ```
-     cd floodmapper/tutorial
-     conda env create -f floodmapper.yml -n floodmapper
-     ```
+ 1. Open a JupyterLab terminal by clicking on the icon.
 
- 1. Activate the new environment and register the kernel with Jupyter:
-     ```
-     # Activate the environment
-     conda activate floodmapper
+ 1. Register the kernel with Jupyter:
 
+     ```
      # Register with Jupyter
      python -m ipykernel install --user --name floodmapper \
      --display-name "Python (floodmapper)"
      ```
+
+ 1. Test that we can activate the environment:
+     ```
+     # Activate the environment
+     conda activate floodmapper
+     ```
+
+The Processing Machine is almost ready to use, aside from enabling
+database and bucket access. We will set these up in the next steps.
