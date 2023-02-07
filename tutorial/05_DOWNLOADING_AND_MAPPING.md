@@ -97,8 +97,8 @@ file written by the download script shortly after starting.
 
 | Model           | Mean recall per flood | Mean precision per flood | Mean IoU per flood |
 |-----------------|:-----------------------:|:--------------------------:|:--------------------:|
-| WF2_unet_full_norm$\cap$MNDWI | 85.30                 | 94.14        | 81.46              |
-| WF2_unet_full_norm           | 96.50     | 83.93                    | 81.36              |
+| WF2_unet_full_norm ∩ MNDWI | 85.30                 | **94.14**        | 81.46              |
+| WF2_unet_full_norm           | **96.50**     | 83.93                    | **81.36**              |
 | WF2_unet_rbgiswirs      | 96.15                 | 82.74                    | 80.21              |
 | MNDWI           | 85.87                 | 80.56                    | 70.45              |
 
