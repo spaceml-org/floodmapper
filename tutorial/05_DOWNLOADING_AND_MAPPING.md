@@ -79,7 +79,7 @@ file written by the download script shortly after starting.
 - Stored in [gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart](gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart)
 - Unet++ like architechtures with slight modifications to produce two independent segmentation masks, one for the clear/cloudy problem and another for water/land problem.
 - **Training data**: Training data from [WorldFloods dataset](https://www.nature.com/articles/s41598-021-86650-z/]) 
-- **Evaluation data**: Training data from [WorldFloods dataset](https://www.nature.com/articles/s41598-021-86650-z/])
+- **Evaluation data**: Test data from [WorldFloods dataset](https://www.nature.com/articles/s41598-021-86650-z/])
 
 ** Available Models: **
 
