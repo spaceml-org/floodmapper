@@ -16,6 +16,7 @@ FloodMapper supports the [GeoJSON data format](https://geojson.org/)
 for specifying AoIs to be mapped. There a number of free and paid
 tools that allow users to draw polygons on a map, including:
 
+ * [https://geojson.io/](https://geojson.io/)
  * [https://www.gmapgis.com/](https://www.gmapgis.com/)
  * ArcGIS: [Documentation](https://desktop.arcgis.com/en/arcmap/latest/manage-data/shapefiles/creating-a-new-shapefile.htm)
  * Q-GIS: [Online Lesson](https://docs.qgis.org/3.22/en/docs/training_manual/create_vector_data/create_new_vector.html)
