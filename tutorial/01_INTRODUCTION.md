@@ -143,3 +143,7 @@ The steps to create a flood-extent map are as follows:
 
 Later in the training, we will go through the mapping procedure from
 start to finish.
+
+---
+
+## NEXT: [Setting up GCP Services](02a_SETUP_SERVICES.md)
