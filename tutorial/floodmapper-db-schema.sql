@@ -238,9 +238,12 @@ ALTER TABLE ONLY public.model_inference
 -- Name: grid_loc lgas_info; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.grid_loc
-    ADD CONSTRAINT lgas_info FOREIGN KEY (lga_name22) REFERENCES public.lgas_info(lga_name22);
+-- CORMAC: LGA TABLE SHOULD NOT IMPOSE LIMITS GRID TABLE
 
+--
+-- ALTER TABLE ONLY public.grid_loc
+--    ADD CONSTRAINT lgas_info FOREIGN KEY (lga_name22) REFERENCES public.lgas_info(lga_name22);
+--
 
 --
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: cloudsqlsuperuser
