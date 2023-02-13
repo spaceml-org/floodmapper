@@ -16,15 +16,16 @@ FloodMapper supports the [GeoJSON data format](https://geojson.org/)
 for specifying AoIs to be mapped. There a number of free and paid
 tools that allow users to draw polygons on a map, including:
 
- * [https://geojson.io/](https://geojson.io/)
- * [https://www.gmapgis.com/](https://www.gmapgis.com/)
- * ArcGIS: [Documentation](https://desktop.arcgis.com/en/arcmap/latest/manage-data/shapefiles/creating-a-new-shapefile.htm)
- * Q-GIS: [Online Lesson](https://docs.qgis.org/3.22/en/docs/training_manual/create_vector_data/create_new_vector.html)
+ * [https://geojson.io/](https://geojson.io/) (recommended).
+ * [https://www.gmapgis.com/](https://www.gmapgis.com/).
+ * ArcGIS: [Documentation](https://desktop.arcgis.com/en/arcmap/latest/manage-data/shapefiles/creating-a-new-shapefile.htm).
+ * Q-GIS: [Online Lesson](https://docs.qgis.org/3.22/en/docs/training_manual/create_vector_data/create_new_vector.html).
 
 Export the shape layer as a GeoJSON file, or ShapeFile, with a valid
 'geometry' column. These can be prepared for use with the FloodMapper
-system using the '03b' python notebook, below. However, we will use
-information in the Copernicus EMS to define our areas of interest.
+system using the '03b' python notebook linked below. However, in this
+tutorial we will extract information from the Copernicus Emergency
+Management System (EMS) to define our areas of interest.
 
 
 ## Extracting Information from Copernicus EMS
@@ -46,9 +47,16 @@ wish to map.
 
 The three main FloodMapper tasks - download, inference and
 post-process - require knowledge of gridded AoIs to work in. The
-following notebook reads arbritrary AoI shapes and sub-samples them to
-FloodMappers pre-defined processing grid.
+following notebook reads arbritrary AoI shapes and resamples them
+using the FloodMapper processing grid. The grid was defined as part of
+the [FloodMapper configuration instructions](02c_SETUP_CONFIGURATION.md).
 
  * [03b_Split_AoIs_Into_Grid_Patches.ipynb](03b_Split_AoIs_Into_Grid_Patches.ipynb)
 
-The final gridded AoI file is uploaded to the GCP storage bucket.
+At the end of this notebook, the final gridded AoI file is uploaded to
+the GCP storage bucket. This is the file that drives main tasks of the
+FloodMapper system.
+
+---
+
+## NEXT: [Querying & Visualising Available Data](04_QUERYING_DATA.md)
