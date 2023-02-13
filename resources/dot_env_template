@@ -5,8 +5,8 @@ ML4FLOODS_DB_USER="postgres"
 ML4FLOODS_DB_PWD="mypassword"
 
 # Google application credentials and project
-GOOGLE_APPLICATION_CREDENTIALS="/home/myname/FloodMapper/floodmapper-access.json"
+GOOGLE_APPLICATION_CREDENTIALS="/home/username/floodmapper-access.json"
 GS_USER_PROJECT="FloodMapper-2023"
 
 # Base directory for installation
-ML4FLOODS_BASE_DIR="/home/myname/FloodMapper"
+ML4FLOODS_BASE_DIR="/home/username/floodmapper"

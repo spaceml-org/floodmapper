@@ -11,7 +11,7 @@ server will refuse all external connections. External machines must
 have their IP address added to a 'whitelist'. To add a machine (e.g.,
 the processing machine) do the following:
 
- 1. Navigate to the [SQL](https://console.cloud.google.com/sql) menu
+ 1. Navigate to the [SQL menu](https://console.cloud.google.com/sql)
  and click on the name of the database server created previously (e.g.,
  'floodmapper-db-server').
 
@@ -55,6 +55,7 @@ address' from the 'Overview' page.
     # Example
     psql -h 35.244.121.15 -U postgres -d floodmapper-db
     ```
+    Enter the database password when prompted.
 
  1. Enable the PostGIS extensions by issuing the command:
     ```
@@ -142,8 +143,10 @@ ML4FLOODS_BASE_DIR="/path/to/floodmapper"
 
 To configure on the VM do the following:
 
- 1. Start a JuputerLab session and open a terminal (do **not** execute
- in the SSH terminal under ```/home/<username>```.
+ 1. Start a JuputerLab session from the [Vertex AI Workbench
+ menu](https://console.cloud.google.com/vertex-ai/workbench?project=floodmapper-demo)
+ and open a terminal (do **not** execute in the standard VM SSH
+ terminal under ```/home/<username>```).
 
  1. Copy the template credential file to the floodmapper directory
     ```
