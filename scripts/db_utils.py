@@ -43,13 +43,13 @@ class DB:
         self.conn.autocommit = True
         print("[INFO] Connection successfully established.")
 
-    def run_query(self, query, fetch=False):
+    def run_query(self, query, data=None, fetch=False):
         """
         Runs a SQL query on the DB and returns a DataFrame with results.
         """
         cur = self.conn.cursor()
         try:
-            cur.execute(query)
+            cur.execute(query, data)
             if fetch:
                 df = pd.DataFrame(cur.fetchall(),
                             columns=[desc[0] for desc in cur.description])
