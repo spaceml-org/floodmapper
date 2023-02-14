@@ -4,32 +4,32 @@
 ## Downloading Data to GCP
 
 Once the AoI, time-range, cloud threshold and overlap threshold have
-been set, the user can start downloading the available data into the
-bucket on GCP. Downloads are managed by the GEE sevice and submitted
-as tasks by the download script. Active and recent GEE tasks can be
-viewed and cancelled on [this web
-page](https://code.earthengine.google.com/tasks). The download script
-must be started in a terminal, so first make sure that the environment
-is setup correctly:
+been determined, the user can start downloading the available data
+into the bucket on GCP. Downloads are managed by the GEE sevice and
+submitted as tasks by the download script. Active and recent GEE tasks
+can be viewed and cancelled on [this web
+page](https://code.earthengine.google.com/tasks).
 
-```
-# Execute in a terminal (assumes BASH shell)
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key/file/floodmapper-key.json"
-export GS_USER_PROJECT="FloodMapper-2023"
-earthengine authenticate # Not needed on GCP
-```
+Like the notebooks, the download script loads the environment from the
+hidden ```.env``` file in the FloodMapper installation directory -
+check now the the ```GOOGLE_APPLICATION_CREDENTIAL``` entry is
+pointing to the correct key file and that the ```GS_USER_PROJECT``` is
+correct. If you are running the script on a local machine, you may
+also need to run the ```earthengine authenticate``` command in the
+terminal.
 
 For this example, we will download images for the floods affecting
 Sydney and Newcastle during July 2022 - EMSR586. We previously
 extracted information on this event from the Copernicus EMS web pages,
 resulting in a list of affected LGAs. We also visualised the
 Sentinel-2 and Landsat imagery to determine the best date-ranges to
-capture both e pre- and post-flood conditions.
+capture both pre- and post-flood conditions.
 
 The download script ```01_download_images.py``` works by:
 
  * Convert a list of LGAs to small square 'patches' on a grid, via
-   a database look-up. **OR**
+   a database look-up.
+   **OR**
  * Read a list of processing patches saved to a GeoJSON file.
  * Query GEE for Sentinel-2 and Landsat data before and during the
    flooding event.
@@ -40,28 +40,40 @@ The download script ```01_download_images.py``` works by:
  * Track image download progress in the database.
  * Download the latest permanent water layers from GEE archive.
 
-To start the download process, execute the following in a terminal:
-
+To start the download process, execute one of the following commands
+in a terminal under the ```floodmapper/scripts``` directory:
 
 ```
+# Change to the scripts directory
+cd scripts
+
 # Query data by pointing to a saved AoI file
 python 01_download_images.py \
-    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --path-aois gs://floodmapper-demo/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
     --preflood-start-date 2022-06-15 \
     --preflood-end-date 2022-06-20 \
-    --threshold-clouds-after 0.95 \
-    --threshold-invalids-after 0.7 \
-    --bucket_path gs://floodmapper-test/0_DEV/1_Staging/GRID
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env
+
+# OR Query data by specifying a list of LGA names
+python 01_download_images.py \
+    --lga-names Newcastle,Maitland,Cessnock \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --preflood-start-date 2022-06-15 \
+    --preflood-end-date 2022-06-20 \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env
 ```
 
 The script will submit a list of tasks to GEE, which accomplishes most
 of the downloads in the background. After submitting all tasks, the
-script continues running, polling GEE every minute to check on the
+script continues running, polling GEE every few seconds to check on the
 task status and update the database. The script writes a 'master list'
 of task 'keys' to a JSON file in the curent directory. This can be
-used with the a notebook to monitor total progress.```
+used with the a notebook to monitor total progress.
 
 
 ## Monitoring Downloads

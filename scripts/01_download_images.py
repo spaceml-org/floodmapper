@@ -20,13 +20,14 @@ from zoneinfo import ZoneInfo
 import ee
 import uuid
 import numpy as np
+from dotenv import load_dotenv
 from db_utils import DB
 
 # DEBUG
 warnings.filterwarnings("ignore")
 
 
-def wait_tasks(tasks:List[ee.batch.Task], db_conn) -> None:
+def wait_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
     """
     Track active GEE download tasks and update database.
 
@@ -45,42 +46,44 @@ def wait_tasks(tasks:List[ee.batch.Task], db_conn) -> None:
     """
 
     # Build a list of active download tasks
-    task_down = []
+    active_tasks = []
     for task in tasks:
         if task.active():
-            task_down.append((task.status()["description"], task))
+            active_tasks.append((task.status()["description"], task))
 
-    # Run while task list contains entries
-    task_error = 0
-    while len(task_down) > 0:
-        print("[INFO] %d tasks running" % len(task_down))
+    # Run while the active task list contains entries
+    task_error_count = 0
+    while len(active_tasks) > 0:
+        print("[INFO] %d tasks running" % len(active_tasks))
 
         # Loop through the tasks
-        task_down_new = []
-        for _i, (t, task) in enumerate(list(task_down)):
+        active_tasks_new = []
+        for _i, (t, task) in enumerate(list(active_tasks)):
 
             # Add active tasks to the new tasks list
             if task.active():
-                task_down_new.append((t, task))
+                active_tasks_new.append((t, task))
                 continue
 
             # Check if inactive tasks have completed, or finished with
             # an error. Mark as completed in the DB, or save error message.
             if task.status()["state"] != "COMPLETED":
                 print("[INFO] error in task {}:\n {}".format(t, task.status()))
-                task_error += 1
+                task_error_count += 1
             elif task.status()["state"] == "COMPLETED":
                 desc = task.status()["description"]
                 query = (f"UPDATE images_download "
                          f"SET in_progress = 0 "
-                         f"WHERE image_id = '{desc}';")
-                db_conn.run_query(query)
+                         f"WHERE image_id = %s;")
+                data = (desc,)
+                db_conn.run_query(query, data)
 
-        # Update the list of active tasks and pause for 60s
-        task_down = task_down_new
-        time.sleep(60)
+        # Update the list of active tasks and pause for interval_s
+        active_tasks = active_tasks_new
+        time.sleep(interval_s)
 
-    print("[INFO] Tasks failed: %d" % task_error)
+    print(f"[INFO] All tasks completed!\n"
+          f"[INFO] Tasks failed: {task_error_count}.")
 
 
 def fix_landsat_gee_id(row):
@@ -101,26 +104,27 @@ def fix_landsat_gee_id(row):
 
 
 def main(path_aois: str,
+         lga_names: str,
          flood_start_date: datetime,
          flood_end_date: datetime,
-         pre_flood_start_date: datetime,
-         pre_flood_end_date: datetime,
-         lga_names: str,
-         threshold_clouds_before: float,
-         threshold_clouds_after: float,
-         threshold_invalids_before: float,
-         threshold_invalids_after: float,
-         collection_placeholder: str = "S2",
+         preflood_start_date: datetime,
+         preflood_end_date: datetime,
+         threshold_clouds_flood: float,
+         threshold_clouds_preflood: float,
+         threshold_invalids_flood: float,
+         threshold_invalids_preflood: float,
+         collection_placeholder: str = "all",
+         bucket_uri: str = "gs://floodmapper-demo",
+         path_env_file: str = "../.env",
          only_one_previous: bool = False,
          channel_configuration:str = "bgriswirs",
          force_s2cloudless: bool = True,
-         bucket_path: str = "gs://ml4floods_nema/0_DEV/1_Staging/GRID/",
          grid_name_filter: str = ""):
 
     # Set the flood start and end times
     today_date =  datetime.today().astimezone(flood_start_date.tzinfo)
     if flood_end_date > today_date:
-        print("[WARN] Flood end date set to future time.")
+        print("[WARN] Flood end date set to future time. Setting today.")
         flood_end_date = today_date
     if flood_start_date > today_date:
         sys.exit("[ERR] Flood start date set to future time!")
@@ -130,54 +134,75 @@ def main(path_aois: str,
     period_flood_end = flood_end_date
 
     # Set the pre-flood start and end times
-    period_pre_flood_end = pre_flood_end_date
-    period_pre_flood_start = pre_flood_start_date
-    
+    if preflood_end_date > today_date:
+        print("[WARN] Pre-flood end date set to future time. Setting today.")
+        preflood_end_date = today_date
+    if preflood_start_date > today_date:
+        sys.exit("[ERR] Pre-flood start date set to future time!")
+    flood_duration = preflood_end_date - preflood_start_date
+    print("[INFO] Pre-flood duration: {}.".format(flood_duration))
+    period_preflood_start = preflood_start_date
+    period_preflood_end = preflood_end_date
+
+    # Parse the bucket URI and name
+    rel_grid_path = "0_DEV/1_Staging/GRID"
+    bucket_path = os.path.join(bucket_uri, rel_grid_path)
+    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
+    print(f"[INFO] Will download files to:\n\t{bucket_path}")
+
+    # Load the environment from the hidden file and connect to database
+    success = load_dotenv(dotenv_path=path_env_file, override=True)
+    if success:
+        print(f"[INFO] Loaded environment from '{path_env_file}' file.")
+        print(f"\tKEY FILE: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
+        print(f"\tPROJECT: {os.environ['GS_USER_PROJECT']}")
+    else:
+        sys.exit(f"[ERR] Failed to load the environment file:\n"
+                 f"\t'{path_env_file}'")
+
     # Connect to the FloodMapper DB
-    db_conn = DB()
+    db_conn = DB(dotenv_path=args.path_env_file)
 
     # Read the gridded AoIs from a file (on GCP or locally).
     if path_aois:
         fs_pathaois = utils.get_filesystem(path_aois)
         if not fs_pathaois.exists(path_aois):
-            sys.exit(f"File not found: {path_aois}")
+            sys.exit(f"[ERR] File not found:\n\t{path_aois}")
+        else:
+            print(f"[INFO] Found AoI file:\n\t{path_aois}")
         if path_aois.endswith(".geojson"):
             aois_data = utils.read_geojson_from_gcp(path_aois)
         else:
             aois_data = gpd.read_file(path_aois)
         if not "name" in aois_data.columns:
             sys.exit(f"[ERR] File '{path_aois}' must have column 'name'.")
+        print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
 
     # Or define AOIs using known names of local government areas (LGAs).
     if lga_names:
         print("[INFO] Searching for LGA names in the database.")
         lga_names_lst = lga_names.split(",")
-        if len(lga_names_lst) == 1:
-            query = (f"SELECT name, ST_AsText(geometry), lga_name22 "
-                     f"FROM grid_loc "
-                     f"WHERE lga_name22 = '{lga_names_lst[0]}'")
-        else:
-            query = (f"SELECT name, ST_AsText(geometry), lga_name22 "
-                     f"FROM grid_loc "
-                     f"WHERE lga_name22 in {tuple(lga_names_lst)}")
-        grid_table = db_conn.run_query(query, fetch= True)
+        query = (f"SELECT name, ST_AsText(geometry), lga_name22 "
+                 f"FROM grid_loc "
+                 f"WHERE lga_name22 IN %s;")
+        data = (tuple(lga_names_lst),)
+        grid_table = db_conn.run_query(query, data, fetch=True)
         grid_table['geometry'] = gpd.GeoSeries.from_wkt(grid_table['st_astext'])
         grid_table.drop(['st_astext'], axis=1, inplace = True)
         aois_data = gpd.GeoDataFrame(grid_table, geometry='geometry')
+        print(f"[INFO] Query returned {len(aois_data)} grid patches.")
 
-        # TODO: Automatically write a file to the database here.
-        
-        # Check for duplicates
-        aois_data_orig_shape = aois_data.shape[0]
-        aois_data = aois_data.drop_duplicates(subset=['name'],
-                                              keep='first',
-                                              ignore_index=True)
-        print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
-              f" GRID duplicates. Removing them from processing.")
+    # Check for duplicates
+    aois_data_orig_shape = aois_data.shape[0]
+    aois_data = aois_data.drop_duplicates(subset=['name'],
+                                          keep='first',
+                                          ignore_index=True)
+    print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
+          f"grid duplicates (removed).")
 
     # Check the number of patches affected
     num_patches = len(aois_data)
-    print(f"[INFO] Found {num_patches} grid patches covering LGAs.")
+    print(f"[INFO] Found {num_patches} grid patches to download.")
     if num_patches == 0:
         sys.exit(f"[ERR] No valid grid patches selected - exiting.")
 
@@ -208,16 +233,12 @@ def main(path_aois: str,
     num_post_images = len(images_available_gee_postflood)
     print(f"[INFO] Found {num_post_images} flooding images on GEE archive.")
 
-    # Set the pre-flood start and end times
-    period_pre_flood_end = flood_start_date - timedelta(days=margin_pre_search)
-    period_pre_flood_start = flood_start_date - timedelta(days=days_before)
-
     # Query data available BEFORE the flood event
     print("[INFO] Querying Google Earth Engine for pre-flooding images.")
     images_available_gee_preflood = ee_query.query(
         area_of_interest,
-        period_pre_flood_start,
-        period_pre_flood_end,
+        period_preflood_start,
+        period_preflood_end,
         producttype=ee_collection_placeholder,
         return_collection=False,
         add_s2cloudless=True)
@@ -233,7 +254,6 @@ def main(path_aois: str,
     print(f"[INFO] Total Images = {total_images}.")
 
     # Perform the spatial join to arive at the final list of images
-    # Splits GEE images into the grid patches.
     print(f"[INFO] Expanding query to all overlapping images.")
     aois_images = ee_query.images_by_query_grid(
         images_available_gee,
@@ -252,11 +272,6 @@ def main(path_aois: str,
     #                          if x['prepost'] == 'pre')
     #    aois_images = aois_images.reset_index(drop=True)
 
-    # Vars for loop
-    path_no_bucket_name = \
-        "/".join(bucket_path.replace("gs://","").split("/")[1:])
-    bucket_name = bucket_path.replace("gs://","").split("/")[0]
-
     # Query all the images that have already been downloaded
     query = (f"SELECT image_id, date, downloaded, valids, "
              f"cloud_probability, in_progress "
@@ -273,7 +288,7 @@ def main(path_aois: str,
     #   'geometry'             ... bounds of image
     #   'cloudcoverpercentage' ... % of obscuring cloud
     #   'gee_id'               ... unique ID of image in GEE
-    #   'system:time_start'    ... ?
+    #   'system:time_start'    ...
     #   'collection_name'      ... satellite collection name
     #   's2cloudless'          ... BOOL: if cloud cover estimated
     #   'utcdatetime'          ... UTC capture date
@@ -299,7 +314,7 @@ def main(path_aois: str,
     #   'in_progress'       ... [0|1] is download in progress?
     #-------------------------------------------------------------------------#
 
-    # List to record submitted tasks
+    # List to record submitted GEE tasks
     tasks = []
 
     # Loop through the list of AVAILABLE images
@@ -323,12 +338,7 @@ def main(path_aois: str,
             # Desc = <name>_<constellation>_<solar day>
             # This is used to name the task in GEE.
             # Check in the database if exists to avoid re-downloading
-            path_image_bucket = os.path.join(bucket_path,
-                                             name,
-                                             constellation,
-                                             f"{solar_day}.tif")\
-                                       .replace("\\","/")
-            fileNamePrefix = os.path.join(path_no_bucket_name,
+            fileNamePrefix = os.path.join(rel_grid_path,
                                           name,
                                           constellation,
                                           solar_day)
@@ -363,11 +373,11 @@ def main(path_aois: str,
                     print("not downloaded.")
                     print("\tChecking DB-stored thresholds:")
                     if prepost == "pre":
-                        thresh_valid = (1 - threshold_invalids_before)
-                        thresh_cloud = threshold_clouds_before
+                        thresh_valid = (1 - threshold_invalids_preflood)
+                        thresh_cloud = threshold_clouds_preflood
                     else:
-                        thresh_valid = (1 - threshold_invalids_after)
-                        thresh_cloud = threshold_clouds_after
+                        thresh_valid = (1 - threshold_invalids_flood)
+                        thresh_cloud = threshold_clouds_flood
                     print("\t\tVALID PIXELS: {:.2f} > [{:.2f}] ?  "\
                           .format(ce["valids"], thresh_valid), end="")
                     if ce["valids"] < thresh_valid:
@@ -397,11 +407,11 @@ def main(path_aois: str,
 
             # Check overlapping percentage and skip low overlap images
             #if prepost == "pre":
-            #    if valid_percentage < threshold_invalids_before:
+            #    if valid_percentage < threshold_invalids_preflood:
             #        print(f"\tImage has low overlap ... skipping.")
             #        continue
             #else:
-            #    if valid_percentage < threshold_invalids_after:
+            #    if valid_percentage < threshold_invalids_flood:
             #        print(f"\tImage has low overlap ... skipping.")
             #        continue
 
@@ -465,11 +475,11 @@ def main(path_aois: str,
             download = True
             print("\tChecking against latest thresholds:")
             if prepost == "pre":
-                thresh_valid = (1 - threshold_invalids_before)
-                thresh_cloud = threshold_clouds_before
+                thresh_valid = (1 - threshold_invalids_preflood)
+                thresh_cloud = threshold_clouds_preflood
             else:
-                thresh_valid = (1 - threshold_invalids_after)
-                thresh_cloud = threshold_clouds_after
+                thresh_valid = (1 - threshold_invalids_flood)
+                thresh_cloud = threshold_clouds_flood
             print("\t\tVALID PIXELS: {:.2f} > [{:.2f}] ?  "\
                   .format(info_ee["valids"], thresh_valid), end="")
             if info_ee["valids"] < thresh_valid:
@@ -519,13 +529,14 @@ def main(path_aois: str,
 
             # Database Update block ------------------------------------------#
 
+            download_url = os.path.join(bucket_uri, rel_grid_path,
+                                        name, constellation,
+                                        f"{solar_day}.tif")
+
             if exist:
                 # Case : Failed thresholds last time, but now it is OK
                 if download:
-                    print("\tUpdating database with re-download in progress.")
-                    download_url = (f"https://storage.cloud.google.com/"
-                                    f"ml4floods_nema/0_DEV/1_Staging/GRID/"
-                                    f"{name}/{constellation}/{solar_day}.tif")
+                    print("\tUpdating database with download in progress.")
                     insert_query = (f"UPDATE images_download "
                                     f"SET downloaded = TRUE, "
                                     f"gcp_filepath = '{download_url}'  "
@@ -539,9 +550,6 @@ def main(path_aois: str,
                 # Case : Image is new and it is OK
                 if download:
                     print("\tUpdating database with new download in progress.")
-                    download_url = (f"https://storage.cloud.google.com/"
-                                    f"ml4floods_nema/0_DEV/1_Staging/GRID/"
-                                    f"{name}/{constellation}/{solar_day}.tif")
                     insert_query = (f"INSERT INTO images_download"
                                     f"(image_id, name, satellite, date, "
                                     f"datetime, downloaded, gcp_filepath, "
@@ -555,12 +563,11 @@ def main(path_aois: str,
                                     f"'{info_ee['valids']}', "
                                     f"'{solardatetime_save}', "
                                     f"'{solar_day}', 1);")
-                    #insert_query = insert_query.strip().replace('\n', ' ')
                     db_conn.run_query(insert_query, fetch = False)
 
                 # Case : Image is new and it is not OK
                 else:
-                    print("\tUpdating database with failed download.")
+                    print("\tUpdating database with skipped download.")
                     insert_query = (f"INSERT INTO images_download"
                                     f"(image_id, name, satellite, date, "
                                     f"datetime, downloaded, "
@@ -575,8 +582,6 @@ def main(path_aois: str,
                                     f"'{solar_day}', 0);")
                     db_conn.run_query(insert_query, fetch = False)
 
-            # TODO path_image_bucket is None if download is False
-
         except Exception as e:
             warnings.warn(f"Failed {_i} {name} {solar_day} "
                           f"{satellite} {prepost}")
@@ -586,6 +591,7 @@ def main(path_aois: str,
 
     # Download yearly permanent water layer from GEE.
     # JRC/GSW1_3/YearlyHistory product.
+    print("\n\n" + "="*80)
     print("\n\n[INFO] Downloading permanent water layer for each grid patch.")
     for aoi_geom in aois_data.itertuples():
 
@@ -632,10 +638,10 @@ def main(path_aois: str,
             traceback.print_exc(file=sys.stdout)
 
     # Create a JSON file with a master task list
-    tasks_fname = datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + ".json"
+    tasks_fname = datetime.now().strftime('%Y-%m-%d_%H.%M.%S') + ".json"
     tasks_dump = [t.status() for t in tasks]
     with open(tasks_fname, "w") as f:
-        json.dump(tasks_dump, f)
+        json.dump(tasks_dump, f, indent=2)
     print(f"\n\n" + "="*80 + "\n\n"
           f"All tasks have now been submitted to Google Earth Engine.\n"
           f"This script will remain running, monitoring task progress.\n"
@@ -668,73 +674,77 @@ if __name__ == '__main__':
                                  formatter_class=argparse.RawTextHelpFormatter)
     req = ap.add_mutually_exclusive_group(required=True)
     req.add_argument("--path-aois", default="",
-        help="Path to GeoJSON containing grided AoIs.")
+        help=(f"Path to GeoJSON containing grided AoIs.\n"
+              f"Can be a GCP bucket URI or path to a local file."))
     req.add_argument('--lga-names', default = "",
-        help="Comma separated string of LGA names.")
+        help=(f"Comma separated string of LGA names.\n"
+              f"Alternative to specifying a GeoJSON containing AoIs."))
     ap.add_argument('--flood-start-date', required=True,
-        help="Start date of the flooding event (YYYY-mm-dd)")
+        help="Start date of the flooding event (YYYY-mm-dd, UTC).")
     ap.add_argument('--flood-end-date', required=True,
-        help="End date of the flooding event (YYYY-mm-dd)")
+        help="End date of the flooding event (YYYY-mm-dd UTC).")
     ap.add_argument('--preflood-start-date', required=True,
-        help="Start date of the unflooded time range (YYYY-mm-dd).")
+        help="Start date of the unflooded time range (YYYY-mm-dd, UTC).")
     ap.add_argument('--preflood-end-date', required=True,
-        help="End date of the unflooded time range (YYYY-mm-dd).")
-    
-    ap.add_argument('--timezone', default="UTC",
-        help="Timezone [UTC].")
-    ap.add_argument('--threshold-clouds-before', default=.1, type=float,
+        help="End date of the unflooded time range (YYYY-mm-dd, UTC).")
+    # TODO: make preflood dates mutually inclusive
+    # https://stackoverflow.com/questions/19414060/
+    #         argparse-required-argument-y-if-x-is-present
+    ap.add_argument('--threshold-clouds-preflood', default=.1, type=float,
         help="Discard pre-flood images with > cloud fraction [%(default)s].")
-    ap.add_argument('--threshold-clouds-after', default=.95, type=float,
+    ap.add_argument('--threshold-clouds-flood', default=.95, type=float,
         help="Discard flood images with > cloud fraction [%(default)s].")
-    ap.add_argument('--threshold-invalids-before', default=.1, type=float,
+    ap.add_argument('--threshold-invalids-preflood', default=.1, type=float,
         help="Discard pre-flood images with > blank fraction [%(default)s].")
-    ap.add_argument('--threshold-invalids-after', default=.7, type=float,
+    ap.add_argument('--threshold-invalids-flood', default=.7, type=float,
         help="Discard flood images with > blank fraction [%(default)s].")
     ap.add_argument("--channel-configuration",
-        default="rgbiswirs", choices=["rgbiswirs", "all"],
+        default="bgriswirs", choices=["bgriswirs", "all"],
         help="Channel configuration requested [%(default)s].")
     ap.add_argument("--collection-name",
         choices=["Landsat", "S2", "all"], default="all",
-        help="GEE collection to download data from [%(default)s]")
-    ap.add_argument("--bucket-path",
-        default="gs://ml4floods_nema/0_DEV/1_Staging/GRID/",
-        help="Path to GRID directory in the GCP bucket \n[%(default)s]")
+        help="GEE collection to download data from [%(default)s].")
+    ap.add_argument("--bucket-uri",
+        default="gs://floodmapper-demo",
+        help="Root URI of the GCP bucket \n[%(default)s].")
+    ap.add_argument("--path-env-file", default="../.env",
+        help="Path to the hidden credentials file [%(default)s].")
     ap.add_argument('--only-one-previous', action='store_true',
         help="Download only one image in the pre-flood period.")
     ap.add_argument('--noforce-s2cloudless', action='store_true',
         help="Do not force s2cloudless product in S2 images.")
     ap.add_argument('--grid-name', default="",
-        help="Only map this grid patch (useful for debugging) [%(default)s].")
+        help="Only download this grid patch (debugging use) [%(default)s].")
     args = ap.parse_args()
 
     # Parse the flood date range
-    timezone_dates = timezone.utc if args.timezone == "UTC" \
-        else ZoneInfo(args.timezone)
     _start = datetime.strptime(args.flood_start_date, "%Y-%m-%d")\
-                              .replace(tzinfo=timezone_dates)
+                     .replace(tzinfo=timezone.utc)
     _end = datetime.strptime(args.flood_end_date, "%Y-%m-%d")\
-                               .replace(tzinfo=timezone_dates)
+                   .replace(tzinfo=timezone.utc)
     flood_start_date, flood_end_date = sorted([_start, _end])
 
     # Parse the unflooded date range
     _start = datetime.strptime(args.preflood_start_date, "%Y-%m-%d")\
-                              .replace(tzinfo=timezone_dates)
+                              .replace(tzinfo=timezone.utc)
     _end = datetime.strptime(args.preflood_end_date, "%Y-%m-%d")\
-                               .replace(tzinfo=timezone_dates)
+                               .replace(tzinfo=timezone.utc)
     preflood_start_date, preflood_end_date = sorted([_start, _end])
 
     main(path_aois=args.path_aois,
          lga_names=args.lga_names,
          flood_start_date=flood_start_date,
          flood_end_date=flood_end_date,
-         pre_flood_start_date=preflood_start_date,
-         pre_flood_end_date=preflood_end_date,
-         threshold_clouds_before=args.threshold_clouds_before,
-         threshold_clouds_after=args.threshold_clouds_after,
-         threshold_invalids_before=args.threshold_invalids_before,
-         threshold_invalids_after=args.threshold_invalids_after,
+         preflood_start_date=preflood_start_date,
+         preflood_end_date=preflood_end_date,
+         threshold_clouds_flood=args.threshold_clouds_flood,
+         threshold_clouds_preflood=args.threshold_clouds_preflood,
+         threshold_invalids_flood=args.threshold_invalids_flood,
+         threshold_invalids_preflood=args.threshold_invalids_preflood,
          collection_placeholder=args.collection_name,
-         bucket_path=args.bucket_path,
+         bucket_uri=args.bucket_uri,
+         path_env_file=args.path_env_file,
          only_one_previous=args.only_one_previous,
+         channel_configuration=args.channel_configuration,
          force_s2cloudless=not args.noforce_s2cloudless,
          grid_name_filter=args.grid_name)
