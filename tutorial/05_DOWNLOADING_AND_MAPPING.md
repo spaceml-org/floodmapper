@@ -73,7 +73,7 @@ of the downloads in the background. After submitting all tasks, the
 script continues running, polling GEE every few seconds to check on the
 task status and update the database. The script writes a 'master list'
 of task 'keys' to a JSON file in the curent directory. This can be
-used with the a notebook to monitor total progress.
+used with a notebook to monitor total progress.
 
 
 ## Monitoring Downloads
@@ -106,7 +106,7 @@ There are currently two available public models:
   - Channel configuration are the 13 available bands of Sentinel-2
   - Only works on Sentinel-2 images.
 
-** Metrics **
+**Metrics**
 
 | Model           | Mean recall per flood | Mean precision per flood | Mean IoU per flood |
 |-----------------|:-----------------------:|:--------------------------:|:--------------------:|
@@ -136,44 +136,73 @@ affect the final output:
 
 ## Starting the Mapping Task
 
-The mapping 'inference' task can be started using the following
-command-line argument, which must be run on each satellite separately:
+The map creation process is split into two tasks:
+
+ * **Inference:** apply the ML model to each of the previously
+    downloaded images.
+ * **Aggregation & Merging:** merge the flood-extent masks in time and
+     space.
+
+The inference task can be started by executing one of the following
+commands from a terminal
+
 
 ```
-# Mapping using the Sentinel-2 data
+# Start mapping using the gridded AoI file
 python 02_run_inference.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
     --start-date 2022-06-15 \
     --end-date 2022-07-24 \
-    --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
-    --max-tile-size 128 \
+    --model-name WF2_unet_rbgiswirs \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env \
+    --collection-name S2 \
+    --distinguish-flood-traces \
+    --overwrite
+
+# OR start mapping using a list of LGAs
+python 02_run_inference.py \
+    --lga-names Newcastle,Maitland,Cessnock \
+    --start-date 2022-06-15 \
+    --end-date 2022-07-24 \
+    --model-name WF2_unet_rbgiswirs \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env \
     --collection-name S2 \
     --distinguish-flood-traces \
     --overwrite
 ```
 
-Now we must run the task again for the LandSat data:
+Here we have chosen a date range that encompases both pre- and
+post-flood data. The argument ```--distinguish-flood-traces``` applies
+a union of ML-derived water masks and a MNDWI threshold for better
+sensitivity. The spatial selection command (```--path-aois``` or
+```--lga-names```) should be the same as in the download task.
 
+Note that the inference task must be applied to each
+satellite separately and should be run a second time with the
+```--collection-name Landsat``` argument.
 
 ```
-# Mapping using the Landsat data
+# Run separately for Landsat
 python 02_run_inference.py \
-    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --lga-names Newcastle,Maitland,Cessnock \
     --start-date 2022-06-15 \
     --end-date 2022-07-24 \
-    --model-path gs://floodmapper-test/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs \
-    --max-tile-size 128 \
+    --model-name WF2_unet_rbgiswirs \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env \
     --collection-name S2 \
     --distinguish-flood-traces \
     --overwrite
 ```
 
-At this point, each valid grid position contains raster maps of water
-and cloud probability, alongside vectorised versions of these that
-have been created by applying a threshold operations. Each satellite
-overpass gives rise to a map, meaning that there may be a time-series
-of maps for each grid patch - depending on how many times teh
-satellites passed over.
+At this point, each valid grid position in the GCP bucket contains
+raster maps of water and cloud probability, alongside vectorised
+versions of these that have been created by applying a threshold
+operations. Each satellite overpass gives rise to a map, meaning that
+there may be a time-series of maps for each grid patch - depending on
+how many times the satellites passed over.
 
 
 ## Running the Post-Processing Steps

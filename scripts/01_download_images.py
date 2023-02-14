@@ -146,9 +146,9 @@ def main(path_aois: str,
 
     # Parse the bucket URI and name
     rel_grid_path = "0_DEV/1_Staging/GRID"
-    bucket_path = os.path.join(bucket_uri, rel_grid_path)
+    bucket_grid_path = os.path.join(bucket_uri, rel_grid_path)
     bucket_name = bucket_uri.replace("gs://","").split("/")[0]
-    print(f"[INFO] Will download files to:\n\t{bucket_path}")
+    print(f"[INFO] Will download files to:\n\t{bucket_grid_path}")
 
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
@@ -161,7 +161,7 @@ def main(path_aois: str,
                  f"\t'{path_env_file}'")
 
     # Connect to the FloodMapper DB
-    db_conn = DB(dotenv_path=args.path_env_file)
+    db_conn = DB(dotenv_path=path_env_file)
 
     # Read the gridded AoIs from a file (on GCP or locally).
     if path_aois:
@@ -607,7 +607,7 @@ def main(path_aois: str,
                 continue
             lon, lat = list(aoi_geom.geometry.centroid.coords)[0]
             crs = ee_download.convert_wgs_to_utm(lon=lon, lat=lat)
-            folder_dest_permament = os.path.join(bucket_path,
+            folder_dest_permament = os.path.join(bucket_grid_path,
                                                  aoi_geom.name,
                                                  "PERMANENTWATERJRC")
             file_dest_permanent = os.path.join(folder_dest_permament,
