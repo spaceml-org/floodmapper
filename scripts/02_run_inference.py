@@ -24,10 +24,12 @@ import pandas as pd
 import warnings
 import json
 import traceback
+from datetime import timedelta, datetime, timezone
 from ml4floods.models.postprocess import get_pred_mask_v2
 from typing import Tuple, Callable, Any, Optional
 from ml4floods.data.worldfloods.configs import BANDS_S2, BANDS_L8
 from skimage.morphology import binary_dilation, disk
+from dotenv import load_dotenv
 from db_utils import DB
 
 # DEBUG
@@ -216,7 +218,7 @@ def vectorize_outputv1(prediction: np.ndarray,
     start = 0
     class_name = {0: "area_imaged", 2: "water", 3: "cloud", 4: "flood_trace"}
     # Dilate invalid mask
-    invalid_mask = binary_dilation(prediction == 0, disk(3)).astype(np.bool)
+    invalid_mask = binary_dilation(prediction == 0, disk(3)).astype(bool)
 
     # Set borders to zero to avoid border effects when vectorizing
     prediction[:border,:] = 0
@@ -252,11 +254,14 @@ def vectorize_outputv1(prediction: np.ndarray,
 
 
 @torch.no_grad()
-def main(start_date: str,
-         end_date: str,
-         path_aois: str,
-         model_path: str,
-         device_name: str,
+def main(path_aois: str,
+         lga_names: str,
+         start_date: datetime,
+         end_date: datetime,
+         experiment_name: str,
+         bucket_uri: str = "gs://floodmapper-demo",
+         path_env_file: str = "../.env",
+         device_name: str = "cpu",
          max_tile_size: int = 1024,
          th_brightness: float = create_gt.BRIGHTNESS_THRESHOLD,
          th_water: float = .5,
@@ -275,17 +280,77 @@ def main(start_date: str,
         session_data['collection_name'] = collection_name
         session_data['distinguish_flood_traces'] = distinguish_flood_traces
         session_data['device_name'] = device_name
-        session_data['date_start'] = start_date
-        session_data['date_end'] = end_date
+        session_data['date_start'] = start_date.strftime('%Y-%m-%d')
+        session_data['date_end'] = end_date.strftime('%Y-%m-%d')
         session_data['th_water'] = th_water
         session_data['th_brightness'] = th_brightness
-        session_data['output_folder'] = output_folder
+        #session_data['output_folder'] = output_folder
         return json.dumps(session_data)
 
-    # Parse the given model path
-    model_path = model_path.replace("\\", "/") # Fix windows convention
-    model_path.rstrip("/")
-    experiment_name = os.path.basename(model_path)
+    # Parse the bucket URI and model name
+    rel_model_path = "0_DEV/2_Mart/2_MLModelMart"
+    model_path = os.path.join(bucket_uri,
+                              rel_model_path,
+                              experiment_name)
+    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
+    print(f"[INFO] Full model path:\n\t{model_path}")
+
+    # Load the environment from the hidden file and connect to database
+    success = load_dotenv(dotenv_path=path_env_file, override=True)
+    if success:
+        print(f"[INFO] Loaded environment from '{path_env_file}' file.")
+        print(f"\tKEY FILE: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
+        print(f"\tPROJECT: {os.environ['GS_USER_PROJECT']}")
+    else:
+        sys.exit(f"[ERR] Failed to load the environment file:\n"
+                 f"\t'{path_env_file}'")
+
+    # Connect to the FloodMapper DB
+    db_conn = DB(dotenv_path=path_env_file)
+
+    # Read the gridded AoIs from a file (on GCP or locally).
+    if path_aois:
+        fs_pathaois = utils.get_filesystem(path_aois)
+        if not fs_pathaois.exists(path_aois):
+            sys.exit(f"[ERR] File not found:\n\t{path_aois}")
+        else:
+            print(f"[INFO] Found AoI file:\n\t{path_aois}")
+        if path_aois.endswith(".geojson"):
+            aois_data = utils.read_geojson_from_gcp(path_aois)
+        else:
+            aois_data = gpd.read_file(path_aois)
+        if not "name" in aois_data.columns:
+            sys.exit(f"[ERR] File '{path_aois}' must have column 'name'.")
+        print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
+
+    # Or define AOIs using known names of local government areas (LGAs).
+    if lga_names:
+        print("[INFO] Searching for LGA names in the database.")
+        lga_names_lst = lga_names.split(",")
+        query = (f"SELECT name, ST_AsText(geometry), lga_name22 "
+                 f"FROM grid_loc "
+                 f"WHERE lga_name22 IN %s;")
+        data = (tuple(lga_names_lst),)
+        grid_table = db_conn.run_query(query, data, fetch=True)
+        grid_table['geometry'] = gpd.GeoSeries.from_wkt(grid_table['st_astext'])
+        grid_table.drop(['st_astext'], axis=1, inplace = True)
+        aois_data = gpd.GeoDataFrame(grid_table, geometry='geometry')
+        print(f"[INFO] Query returned {len(aois_data)} grid patches.")
+
+    # Check for duplicates
+    aois_data_orig_shape = aois_data.shape[0]
+    aois_data = aois_data.drop_duplicates(subset=['name'],
+                                          keep='first',
+                                          ignore_index=True)
+    print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
+          f"grid duplicates (removed).")
+
+    # Check the number of patches affected
+    num_patches = len(aois_data)
+    print(f"[INFO] Found {num_patches} grid patches to map.")
+    if num_patches == 0:
+        sys.exit(f"[ERR] No valid grid patches selected - exiting.")
+    aois_list = aois_data.name.to_list()
 
     # Load the inference function
     inference_function, config = \
@@ -301,34 +366,23 @@ def main(start_date: str,
     # Set debugging ON
     #import pdb;pdb.set_trace()
 
-    # Read the selected grid patch GeoJSON file from GCP
-    print("[INFO] Reading gridded AoIs from GCP bucket.")
-    fs = get_filesystem(path_aois)
-    aois = utils.read_geojson_from_gcp(path_aois)
-    aois_list = aois.name.to_list()
-    print(f"[INFO] Found {len(aois_list)} grid patches.")
-
-    # Connect to the database
-    db_conn = DB()
-
     # Select the downloaded images to run inference on
     img_query = (f"SELECT * FROM images_download "
                  f"WHERE satellite = '{collection_name}' "
                  f"AND name in {tuple(aois_list)} "
                  f"AND date >= '{start_date}' "
                  f"AND date <= '{end_date}'")
-    df = db_conn.run_query(img_query, fetch = True)
-
-    # Format the path to the images
-    if len(df) > 0:
-        images_predict = \
-            [x.replace("https://storage.cloud.google.com/", "gs://")
-             for x in df[df['downloaded'] == True]['gcp_filepath'].values]
-        images_predict.sort(key = lambda x:
+    img_df = db_conn.run_query(img_query, fetch = True)
+    num_rows = len(img_df)
+    print(f"[INFO] Entries for {num_rows} images in the DB.")
+    img_df = img_df[img_df.downloaded == True]
+    num_rows = len(img_df)
+    print(f"[INFO] Of these, {num_rows} have been downloaded.")
+    images_predict = img_df.gcp_filepath.values.tolist()
+    images_predict.sort(key = lambda x:
                             os.path.splitext(os.path.basename(x))[0])
-
-    else:
-        raise AssertionError("No images found matching selection!")
+    if len(images_predict) == 0:
+        sys.exit("[WARN] No images matching selection - exiting.")
 
     # Model inference monitoring progress bars
 #    tasks_df = df[df['downloaded'] == True].copy()
@@ -348,7 +402,6 @@ def main(start_date: str,
 
     # Construct the session data JSON - later saved in the DB with each image
     session_data = construct_session_data()
-
 
     # Process each image in turn
     files_with_errors = []
@@ -390,7 +443,7 @@ def main(start_date: str,
 
         try:
             # Load the image, WCS transform and CRS from GCP
-            print("\tLoading image from GCP.")
+            print("\tLoading image from GCP ...")
             channels = get_channel_configuration_bands(
                 config.data_params.channel_configuration,
                 collection_name=collection_name,as_string=True)
@@ -398,24 +451,31 @@ def main(start_date: str,
                 dataset.load_input(filename, window=None, channels=channels)
             with rasterio.open(filename) as src:
                 crs = src.crs
+            print("\tImage loaded successfully.")
 
             # Run inference on the image
+            print("\tRunning inference on the image ...")
             prediction, pred_cont = inference_function(torch_inputs)
             prediction = prediction.cpu().numpy()
             pred_cont = pred_cont.cpu().numpy()
+            print("\tInference completed.")
 
             # Save data as vectors
+            print("\tVectorising prediction ...")
             data_out = vectorize_outputv1(prediction, crs, transform)
             if data_out is not None:
                 if not filename_save_vect.startswith("gs"):
                     fs.makedirs(os.path.dirname(filename_save_vect),
                                 exist_ok=True)
                 utils.write_geojson_to_gcp(filename_save_vect, data_out)
+                print(f"\tSaved to:\n\t{filename_save_vect}")
+            else:
+                print("\t[WARN] Vector data was NONE.")
 
             # Save data as COG GeoTIFF
             profile = {"crs": crs,
                        "transform": transform,
-                       "compression": "lzw",
+                       #"compression": "lzw",
                        "RESAMPLING": "NEAREST",
                        "nodata": 0}
             if not filename_save.startswith("gs"):
@@ -484,16 +544,25 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=desc_str, epilog=epilog_str,
                                  formatter_class=argparse.RawTextHelpFormatter)
-
-    ap.add_argument("--path-aois", default="",
-        help="Path to GeoJSON containing grided AoIs.")
+    req = ap.add_mutually_exclusive_group(required=True)
+    req.add_argument("--path-aois", default="",
+        help=(f"Path to GeoJSON containing grided AoIs.\n"
+              f"Can be a GCP bucket URI or path to a local file."))
+    req.add_argument('--lga-names', default = "",
+        help=(f"Comma separated string of LGA names.\n"
+              f"Alternative to specifying a GeoJSON containing AoIs."))
     ap.add_argument("--start-date", required=True,
-        help="Date to start inference (YYYY-mm-dd)")
+        help="Date to start inference (YYYY-mm-dd, UTC)")
     ap.add_argument("--end-date", required=True,
-        help="Date to finish inference (YYYY-mm-dd)")
-    ap.add_argument("--model-path",
-        default="gs://ml4floods_nema/0_DEV/2_Mart/2_MLModelMart/WF2_unet_rbgiswirs",
-        help="Path to folder containing model.pt and config.json file.")
+        help="Date to finish inference (YYYY-mm-dd, UTC)")
+    ap.add_argument("--model-name",
+        default="WF2_unet_rbgiswirs",
+        help="Name of the folder containing model.pt and config.json files.")
+    ap.add_argument("--bucket-uri",
+        default="gs://floodmapper-demo",
+        help="Root URI of the GCP bucket \n[%(default)s].")
+    ap.add_argument("--path-env-file", default="../.env",
+        help="Path to the hidden credentials file [%(default)s].")
     ap.add_argument("--max-tile-size", type=int, default=1_024,
         help="Maximum size of the processing tiles in NN [%(default)s].")
     ap.add_argument('--overwrite', default=False, action='store_true',
@@ -522,10 +591,20 @@ if __name__ == "__main__":
                 f"Device '{args.device_name}' is not available. "
                 f"Run with --device-name cpu")
 
+    # Parse the processing date range
+    _start = datetime.strptime(args.start_date, "%Y-%m-%d")\
+                     .replace(tzinfo=timezone.utc)
+    _end = datetime.strptime(args.end_date, "%Y-%m-%d")\
+                   .replace(tzinfo=timezone.utc)
+    start_date, end_date = sorted([_start, _end])
+
     main(path_aois=args.path_aois,
-         start_date=args.start_date,
-         end_date= args.post_flood_date_to,
-         model_path=args.model_path,
+         lga_names=args.lga_names,
+         start_date=start_date,
+         end_date=end_date,
+         experiment_name=args.model_name,
+         bucket_uri=args.bucket_uri,
+         path_env_file=args.path_env_file,
          device_name=args.device_name,
          max_tile_size=args.max_tile_size,
          th_water=args.th_water,
