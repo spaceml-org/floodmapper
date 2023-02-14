@@ -25,7 +25,7 @@ class DB:
         Load the DB connection details and initialise a DB cursor.
         """
 
-        success_load = load_dotenv(dotenv_path)
+        success_load = load_dotenv(dotenv_path, override=True)
         if not success_load:
             e = "[ERR] Failed to load the '{}' file.".format(dotenv_path)
             raise Exception(e)
