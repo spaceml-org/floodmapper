@@ -514,7 +514,7 @@ def main(path_aois: str,
                 f"'{filename_save_cont}', "
                 f"'{filename_save_vect}', "
                 f"'{session_data}') "
-                f"ON CONFLICT DO NOTHING;")
+                f"ON CONFLICT (prediction) DO NOTHING;")
             db_conn.run_query(update_query, fetch = False)
 
             # Advance the progress bars

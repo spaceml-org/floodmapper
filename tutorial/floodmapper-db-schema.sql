@@ -218,6 +218,12 @@ ALTER TABLE ONLY public.images_download
 ALTER TABLE ONLY public.lgas_info
     ADD CONSTRAINT lgas_info_sample_pkey PRIMARY KEY (lga_name22);
 
+--
+-- Add a constraint so that model rows are quique.
+--
+
+ALTER TABLE ONLY public.model_inference
+    ADD CONSTRAINT model_inference_unique_path UNIQUE (prediction);
 
 --
 -- Name: grid_loc_sample_geometry_geom_idx; Type: INDEX; Schema: public; Owner: postgres
