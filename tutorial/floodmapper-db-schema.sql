@@ -165,7 +165,31 @@ CREATE TABLE public.postproc_spatial (
 );
 
 
+
+
+
+
 ALTER TABLE public.postproc_spatial OWNER TO postgres;
+
+
+
+CREATE TABLE public.postproc_spatial_new (
+    bucket_uri character varying(50),
+    session character varying(50) NOT NULL,
+    patch_name character varying NOT NULL,
+    model_name character varying,
+    date_start date,
+    date_end date,
+    mode character varying NOT NULL,
+    status integer DEFAULT 0, 
+    data_path character varying,
+    aois text[],
+    PRIMARY KEY(session, patch_name, mode)
+);
+
+
+
+ALTER TABLE public.postproc_spatial_new OWNER TO postgres;
 
 --
 -- Name: postproc_temporal; Type: TABLE; Schema: public; Owner: postgres
@@ -187,6 +211,23 @@ CREATE TABLE public.postproc_temporal (
 
 
 ALTER TABLE public.postproc_temporal OWNER TO postgres;
+
+
+CREATE TABLE public.postproc_temporal_new (
+    bucket_uri character varying(50),
+    session character varying(50) NOT NULL,
+    patch_name character varying NOT NULL,
+    model_name character varying,
+    date_start date,
+    date_end date,
+    mode character varying NOT NULL,
+    status integer DEFAULT 0, 
+    data_path character varying,
+    PRIMARY KEY(session, patch_name, mode)
+);
+
+ALTER TABLE public.postproc_temporal_new OWNER TO postgres;
+
 
 --
 -- Name: grid_loc ogc_fid; Type: DEFAULT; Schema: public; Owner: postgres
