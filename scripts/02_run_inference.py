@@ -581,7 +581,8 @@ if __name__ == "__main__":
         default=create_gt.BRIGHTNESS_THRESHOLD,
         help="Brightness threshold for cloud predictions.[%(default)s].")
     ap.add_argument('--device-name', default="cuda",
-        help="Device name [%(default)s].")
+                    choices=["cpu", "cuda", "mps"],
+                    help="Device name [%(default)s].")
     ap.add_argument("--collection-name",
         choices=["Landsat", "S2"], default="S2",
         help="Collection name to predict on [%(default)s].")
