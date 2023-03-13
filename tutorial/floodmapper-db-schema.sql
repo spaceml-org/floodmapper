@@ -176,15 +176,14 @@ ALTER TABLE public.postproc_spatial OWNER TO postgres;
 CREATE TABLE public.postproc_spatial_new (
     bucket_uri character varying(50),
     session character varying(50) NOT NULL,
-    patch_name character varying NOT NULL,
-    model_name character varying,
-    date_start date,
-    date_end date,
+    flood_date_start date,
+    flood_date_end date,
+    ref_date_start date,
+    ref_date_end date,
     mode character varying NOT NULL,
-    status integer DEFAULT 0, 
     data_path character varying,
-    aois text[],
-    PRIMARY KEY(session, patch_name, mode)
+    status integer DEFAULT 0,
+    PRIMARY KEY(session, mode)
 );
 
 
