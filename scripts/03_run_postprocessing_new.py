@@ -33,11 +33,21 @@ def _key_sort(x):
     return date + append
 
 
-def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None):
+def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
+                        load_existing=False):
     """
     Perform time-aggregation on a list of GeoJSONs.
     """
     aggregate_floodmap = None
+    if load_existing:
+        try:
+            tq.write(f"\tLoad existing temporal aggregate map.")
+            aggregate_floodmap = utils.read_geojson_from_gcp(data_out_path)
+            return aggregate_floodmap
+        except Exception:
+            tq.write(f"\t[WARN] Failed! Proceeding to create new aggregation.")
+            aggregate_floodmap = None
+
     try:
         # Perform the time aggregation on the list of GeoJSONs
         num_files = len(geojsons_lst)
@@ -116,7 +126,7 @@ def main(path_aois,
          path_env_file: str = "../.env",
          collection_name: str = "all",
          model_name: str = "all",
-         overwrite:bool=False):
+         overwrite: bool=False):
 
     # Only create the inundation map if given reference dates
     create_inundate_map = True
@@ -212,8 +222,6 @@ def main(path_aois,
     db_conn.run_query(query, data)
 
     # Loop through the grid patches performing temporal aggregations
-    ref_paths, flood_paths, inundate_paths = [], [], []
-    #for _iaoi, aoi in enumerate(aois_list):
     for _iaoi, aoi in tq(enumerate(aois_list), total = len(aois_list)):
 
         tq.write("\n" + "-"*80 + "\n")
@@ -257,18 +265,6 @@ def main(path_aois,
             (f"flood_{flood_start_date_str}"
              f"_{flood_end_date_str}.geojson")).replace("\\", "/")
 
-        # Check in the DB if the aggregates have been created previously
-        query = (f"SELECT DISTINCT mode, data_path "
-                 f"FROM postproc_temporal_new "
-                 f"WHERE session = %s "
-                 f"AND patch_name = %s ")
-        data = (session_code, aoi)
-        data_df = db_conn.run_query(query, data, fetch=True)
-        #tq.write(data_df.loc[data_df["mode"] == "postflood"])
-        #flood_agg_done = True if "postflood" in modes else False
-        #ref_agg_done = True if "reference" in modes else False
-        #inund_agg_done = True if "inundate" in modes else False
-
         # Load vectorized JRC permanent water
         tq.write(f"\tLoading permanent water layer.")
         try:
@@ -296,7 +292,8 @@ def main(path_aois,
         # Perform the time aggregation on the list of GeoJSONs
         best_flood_map = do_time_aggregation(geojsons_flood,
                                              flood_path,
-                                             permanent_water_map)
+                                             permanent_water_map,
+                                             not(overwrite))
 
         # Update the with the details of the aggregate and set 'status' = 1
         if best_flood_map is not None:
@@ -304,7 +301,6 @@ def main(path_aois,
             do_update_temporal(db_conn, bucket_uri, session_code, aoi,
                                model_name, flood_start_date, flood_end_date,
                                "flood", 1, flood_path)
-            flood_paths.append(flood_path)
         else:
             tq.write(f"[ERR] Failed to create flood map for {aoi}, skipping.")
             continue
@@ -317,7 +313,6 @@ def main(path_aois,
             ref_path = os.path.join(
                 write_aoi_path, "pre_post_products",
                 f"ref_{ref_end_date_str}.geojson" ).replace("\\","/")
-            ref_paths.append(ref_path)
 
             # Select the REFERENCE geojsons by date range
             geojsons_ref = [g for g in geojsons_lst
@@ -334,13 +329,13 @@ def main(path_aois,
 
             # Perform the time aggregation on the list of GeoJSONs
             best_ref_map = do_time_aggregation(geojsons_ref,
-                                          ref_path,
-                                          permanent_water_map)
+                                               ref_path,
+                                               permanent_water_map,
+                                               not(overwrite))
             if best_ref_map is not None:
                 do_update_temporal(db_conn, bucket_uri, session_code, aoi,
                                    model_name, ref_start_date, ref_end_date,
                                    "ref", 1, ref_path)
-                ref_paths.append(ref_path)
             else:
                 tq.write(f"[ERR] Failed to create ref map for {aoi}, skipping.")
                 continue
@@ -370,7 +365,6 @@ def main(path_aois,
                 do_update_temporal(db_conn, bucket_uri, session_code, aoi,
                                    model_name, ref_start_date, flood_end_date,
                                    "inundate", 1, inundate_path)
-                inundate_paths.append(inundate_path)
 
             except Exception:
                 tq.write(f"[ERR] Failed to create inundation map for {aoi}!")
@@ -399,6 +393,7 @@ def main(path_aois,
              f"SET status = %s "
              f"WHERE session = %s;")
     data = (0, session_code)
+    db_conn.run_query(query, data)
 
     # Select the files for the FLOOD map
     flood_df = temporal_df.loc[temporal_df["mode"] == "flood"]
@@ -522,9 +517,6 @@ if __name__ == "__main__":
         help="Start date of the unflooded time range (YYYY-mm-dd, UTC).")
     ap.add_argument('--ref-end-date', required=False,
         help="End date of the unflooded time range (YYYY-mm-dd, UTC).")
-    # TODO: make ref dates mutually inclusive
-    # https://stackoverflow.com/questions/19414060/
-    #         argparse-required-argument-y-if-x-is-present
     ap.add_argument('--session-code', required=True,
         help="Mapping session code (e.g, EMSR586).")
     ap.add_argument("--bucket-uri",
@@ -539,7 +531,9 @@ if __name__ == "__main__":
         choices=["WF2_unet_rbgiswirs", "all"], default="all",
         help="Model outputs to include in the postprocessing. [%(default)s].")
     ap.add_argument('--overwrite', default=False, action='store_true',
-        help="Overwrite existing output products.")
+        help=(f"Overwrite existing temporal merge products.\n"
+              f"Default is to re-create all temporal products before "
+              f"performing spatial merge."))
     args = ap.parse_args()
 
     # Parse the flood date range
