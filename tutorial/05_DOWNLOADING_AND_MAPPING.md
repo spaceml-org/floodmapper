@@ -25,12 +25,11 @@ resulting in a list of affected LGAs. We also visualised the
 Sentinel-2 and Landsat imagery to determine the best date-ranges to
 capture both pre- and post-flood conditions.
 
-The download script ```01_download_images.py``` works by:
+The steps perormed by the download script ```01_download_images.py``` are:
 
- * Convert a list of LGAs to small square 'patches' on a grid, via
-   a database look-up.
-   **OR**
- * Read a list of processing patches saved to a GeoJSON file.
+ * Convert a list of LGAs to small square 'patches' on a grid via
+   a database look-up, **OR**
+ * Read a list of processing patches saved to a GeoJSON file on GCP.
  * Query GEE for Sentinel-2 and Landsat data before and during the
    flooding event.
  * Determine cloud probability masks from archive data.
@@ -93,8 +92,9 @@ architechtures with slight modifications to produce two independent
 segmentation masks - one assessing cloudy/clear conditions and the
 other for classifying water/land. The model has been trained and
 evaluated on a recently developed *global* dataset of flooding imagery
-called
-[WorldFloods](https://www.nature.com/articles/s41598-021-86650-z/]).
+called *WorldFloods* (see paper in [Nature Scientific
+Reports](https://www.nature.com/articles/s41598-021-86650-z/]) for
+details).
 
 There are currently two available public models:
 
@@ -102,16 +102,21 @@ There are currently two available public models:
   - Channel configuration is common bands of Sentinel-2 and Landsat (RGB,
     NIR and SWIR bands).
   - Can be applied to both Sentinel-2 and Landsat8/9 data.
+  - This is the default model provided here with FloodMapper.
 * **WF2_unet_full_norm**
   - Channel configuration are the 13 available bands of Sentinel-2
   - Only works on Sentinel-2 images.
+
+In a deployment setting, we achieve better performance by combining
+the output of the UNet model with a *modified normalised difference
+water index* ([MNDWI](https://doi.org/10.1080/01431160600589179)) calculation.
 
 **Metrics**
 
 | Model           | Mean recall per flood | Mean precision per flood | Mean IoU per flood |
 |-----------------|:-----------------------:|:--------------------------:|:--------------------:|
-| WF2_unet_full_norm ∩ MNDWI | 85.30                 | **94.14**        | 81.46              |
-| WF2_unet_full_norm           | **96.50**     | 83.93                    | **81.36**              |
+| WF2_unet_full_norm ∩ MNDWI | 85.30                 | **94.14**        | **81.46**              |
+| WF2_unet_full_norm           | **96.50**     | 83.93                    | 81.36              |
 | WF2_unet_rbgiswirs      | 96.15                 | 82.74                    | 80.21              |
 | MNDWI           | 85.87                 | 80.56                    | 70.45              |
 
@@ -123,14 +128,15 @@ affect the final output:
  1. Run the model on each grid image to create probability images of
     land, cloud and water.
     * No inference parameters, but model training details can be viewed
-      in the config file at ```WF2_unet_rbgiswirs/config.json```.
+      in the config file at
+      [WF2_unet_rbgiswirs/config.json](../resources/models/WF2_unet_rbgiswirs/config.json).
  1. Generate pixel masks of land, cloud and water by applying
   thresholds to the probability images.
     * Water Threshold supplied to the inference script (```--th_water```).
     * Brightness Threshold supplied to the inference script for cloud
     predictions (```--th_brightness```).
- 1. Collapse time-series of images in each grid into a single image.
  1. Vectorise the pixel masks into polygons.
+ 1. Collapse time-series of polygons in each grid patch into a single image.
  1. Perform a spatial merge on the polygons to generate larger images.
 
 
@@ -205,6 +211,32 @@ there may be a time-series of maps for each grid patch - depending on
 how many times the satellites passed over.
 
 
+```
+1_Staging
+   │
+   └─ GRID
+      ├─ GRID11716
+      │  ├─ PERMANENTWATERJRC
+      │  ├─ PERMANENTWATERJRC_vec     ... Permanent water polygon
+      │  ├─ S2                        ... Downloaded S2 imagery
+      │  ├─ Landsat                   ... Downloaded Landsat imagery
+      │  ├─ WF2_unet_rbgiswirs
+      │  │
+      │  └─ WF2_unet_rbgiswirs_vec    ... Model predictions
+      │     ├─ Landsat
+      │     │
+      │     └─ S2
+      │        ├─ 2022-07-08.tif      ... Predictions on S2 data
+      │        ├─ 2022-07-13.tif          for different days.
+      │        └─ 2022-07-18.tif
+      │
+      │
+      ├─ GRID11717
+      └─ ...
+
+```
+
+
 ## Running the Post-Processing Steps
 
 During post-processing the system runs through each grid position and
@@ -214,18 +246,7 @@ are then merged into a single file using a spatial disolve operartion.
 The following command is used to perform the merge:
 
 ```
-# Old command
-python 03_run_postprocessing.py \
-    --lga-names Newcastle,Maitland,Cessnock \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
-    --preflood-start-date 2022-06-15 \
-    --preflood-end-date 2022-06-20 \
-    --session-code EMSR586 \
-    --bucket-uri gs://floodmapper-demo \
-    --path-env-file ../.env
-
-# New command
+# Merge the predictions into a final flood map
 python 03_run_postprocessing_new.py \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
