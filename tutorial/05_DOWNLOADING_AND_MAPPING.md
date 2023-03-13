@@ -192,7 +192,7 @@ python 02_run_inference.py \
     --model-name WF2_unet_rbgiswirs \
     --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env \
-    --collection-name S2 \
+    --collection-name Landsat \
     --distinguish-flood-traces \
     --overwrite
 ```
@@ -214,19 +214,31 @@ are then merged into a single file using a spatial disolve operartion.
 The following command is used to perform the merge:
 
 ```
-# Merging the mapping data
+# Old command
 python 03_run_postprocessing.py \
-    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --session-code EMSR586 \
+    --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
     --preflood-start-date 2022-06-15 \
     --preflood-end-date 2022-06-20 \
-    --grid-folder gs://floodmapper-test/0_DEV/1_Staging/GRID \
-    --session-base-path gs://floodmapper-test/0_DEV/1_Staging/operational
+    --session-code EMSR586 \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env
+
+# New command
+python 03_run_postprocessing_new.py \
+    --lga-names Newcastle,Maitland,Cessnock \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --ref-start-date 2022-06-15 \
+    --ref-end-date 2022-06-20 \
+    --session-code EMSR586 \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env
 ```
 
-After the script has completed, the final map will be available on the
-GCP bucket under the ```operational/<SESSION_NAME>``` folder.
-
-
+After the script has completed, the final maps will be available on
+the GCP bucket under the ```operational/<SESSION_NAME>``` folder. The
+script produces a flood-extent map and (optionally) an inundation map
+showing the difference between the flood and water in a reference
+image.

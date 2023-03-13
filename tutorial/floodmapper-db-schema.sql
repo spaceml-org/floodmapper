@@ -165,7 +165,30 @@ CREATE TABLE public.postproc_spatial (
 );
 
 
+
+
+
+
 ALTER TABLE public.postproc_spatial OWNER TO postgres;
+
+
+
+CREATE TABLE public.postproc_spatial_new (
+    bucket_uri character varying(50),
+    session character varying(50) NOT NULL,
+    flood_date_start date,
+    flood_date_end date,
+    ref_date_start date,
+    ref_date_end date,
+    mode character varying NOT NULL,
+    data_path character varying,
+    status integer DEFAULT 0,
+    PRIMARY KEY(session, mode)
+);
+
+
+
+ALTER TABLE public.postproc_spatial_new OWNER TO postgres;
 
 --
 -- Name: postproc_temporal; Type: TABLE; Schema: public; Owner: postgres
@@ -187,6 +210,23 @@ CREATE TABLE public.postproc_temporal (
 
 
 ALTER TABLE public.postproc_temporal OWNER TO postgres;
+
+
+CREATE TABLE public.postproc_temporal_new (
+    bucket_uri character varying(50),
+    session character varying(50) NOT NULL,
+    patch_name character varying NOT NULL,
+    model_name character varying,
+    date_start date,
+    date_end date,
+    mode character varying NOT NULL,
+    status integer DEFAULT 0, 
+    data_path character varying,
+    PRIMARY KEY(session, patch_name, mode)
+);
+
+ALTER TABLE public.postproc_temporal_new OWNER TO postgres;
+
 
 --
 -- Name: grid_loc ogc_fid; Type: DEFAULT; Schema: public; Owner: postgres
@@ -218,6 +258,12 @@ ALTER TABLE ONLY public.images_download
 ALTER TABLE ONLY public.lgas_info
     ADD CONSTRAINT lgas_info_sample_pkey PRIMARY KEY (lga_name22);
 
+--
+-- Add a constraint so that model rows are quique.
+--
+
+ALTER TABLE ONLY public.model_inference
+    ADD CONSTRAINT model_inference_unique_path UNIQUE (prediction);
 
 --
 -- Name: grid_loc_sample_geometry_geom_idx; Type: INDEX; Schema: public; Owner: postgres

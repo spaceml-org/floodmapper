@@ -1,6 +1,6 @@
 #POSTPROCESSING
 
-GEOJSON_ITER = '''SELECT prediction_vec FROM model_inference WHERE name = '{}' AND satellite IN {};'''
+GEOJSON_ITER = '''SELECT DISTINCT prediction_vec FROM model_inference WHERE name = '{}' AND satellite IN {};'''
 
 GEOJSON_ITER_MODEL = '''SELECT prediction_vec FROM model_inference WHERE name = '{}' AND satellite IN {} AND model_id = '{}';'''
 

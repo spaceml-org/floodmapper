@@ -284,7 +284,6 @@ def main(path_aois: str,
         session_data['date_end'] = end_date.strftime('%Y-%m-%d')
         session_data['th_water'] = th_water
         session_data['th_brightness'] = th_brightness
-        #session_data['output_folder'] = output_folder
         return json.dumps(session_data)
 
     # Parse the bucket URI and model name
@@ -409,20 +408,21 @@ def main(path_aois: str,
     for total, filename in enumerate(images_predict):
 
         # Compute folder name to save the predictions if not provided
-        base_output_folder = os.path.dirname(os.path.dirname(filename))
-        output_folder_iter = os.path.join(base_output_folder, experiment_name,
-                                          collection_name).replace("\\", "/")
-        output_folder_iter_vec = os.path.join(base_output_folder,
+        output_folder_grid = os.path.dirname(os.path.dirname(filename))
+        output_folder_model = os.path.join(output_folder_grid,
+                                           experiment_name,
+                                           collection_name).replace("\\", "/")
+        output_folder_model_vec = os.path.join(output_folder_grid,
                                             experiment_name + "_vec",
                                             collection_name).replace("\\", "/")
-        output_folder_iter_cont = os.path.join(base_output_folder,
+        output_folder_model_cont = os.path.join(output_folder_grid,
                                             experiment_name + "_cont",
                                             collection_name).replace("\\", "/")
-        filename_save = os.path.join(output_folder_iter,
+        filename_save = os.path.join(output_folder_model,
                                      os.path.basename(filename))
-        filename_save_cont = os.path.join(output_folder_iter_cont,
+        filename_save_cont = os.path.join(output_folder_model_cont,
                                           os.path.basename(filename))
-        filename_save_vect = os.path.join(output_folder_iter_vec,
+        filename_save_vect = os.path.join(output_folder_model_vec,
                 f"{os.path.splitext(os.path.basename(filename))[0]}.geojson")
         path_split = os.path.splitext(filename_save)[0].split('/')
         name, model_id, satellite, date = path_split[-4:]
@@ -437,13 +437,13 @@ def main(path_aois: str,
 
         # Skip existing images, unless overwrite flag is True
         if not overwrite and check_exist(image_id, db_conn):
-            print(f"\tImage already exists in database ... skipping.")
+            print(f"\tResult already exists in database ... skipping.")
             print(f"\tUse '--overwrite' flag to force overwrite.")
             continue
 
         try:
             # Load the image, WCS transform and CRS from GCP
-            print("\tLoading image from GCP ...")
+            print("\tLoading image from GCP ... ", end="")
             channels = get_channel_configuration_bands(
                 config.data_params.channel_configuration,
                 collection_name=collection_name,as_string=True)
@@ -451,31 +451,31 @@ def main(path_aois: str,
                 dataset.load_input(filename, window=None, channels=channels)
             with rasterio.open(filename) as src:
                 crs = src.crs
-            print("\tImage loaded successfully.")
+            print("OK")
 
             # Run inference on the image
-            print("\tRunning inference on the image ...")
+            print("\tRunning inference on the image ... ", end="")
             prediction, pred_cont = inference_function(torch_inputs)
             prediction = prediction.cpu().numpy()
             pred_cont = pred_cont.cpu().numpy()
-            print("\tInference completed.")
+            print("OK")
 
             # Save data as vectors
-            print("\tVectorising prediction ...")
+            print("\tVectorising prediction ... ", end="")
             data_out = vectorize_outputv1(prediction, crs, transform)
+            print("OK")
             if data_out is not None:
                 if not filename_save_vect.startswith("gs"):
                     fs.makedirs(os.path.dirname(filename_save_vect),
                                 exist_ok=True)
                 utils.write_geojson_to_gcp(filename_save_vect, data_out)
-                print(f"\tSaved to:\n\t{filename_save_vect}")
+                print(f"\tSaved vectors to:\n\t{filename_save_vect}")
             else:
                 print("\t[WARN] Vector data was NONE.")
 
             # Save data as COG GeoTIFF
             profile = {"crs": crs,
                        "transform": transform,
-                       #"compression": "lzw",
                        "RESAMPLING": "NEAREST",
                        "nodata": 0}
             if not filename_save.startswith("gs"):
@@ -486,6 +486,7 @@ def main(path_aois: str,
                               tags={"invalid":0, "land":1, "water":2,
                                     "cloud":3 , "trace":4,
                                     "model": experiment_name})
+            print(f"\tSaved prediction to:\n\t{filename_save}")
             if not filename_save_cont.startswith("gs"):
                 fs.makedirs(os.path.dirname(filename_save_cont), exist_ok=True)
             if pred_cont.shape[0] == 2:
@@ -497,8 +498,11 @@ def main(path_aois: str,
                               profile=profile.copy(),
                               descriptions=descriptions,
                               tags={"model": experiment_name})
+            print(f"\tSaved cont prediction to:\n\t{filename_save_cont}")
 
             # Update the database with details of the image
+            # TODO: Check if we need to convert to UPSERT
+            print("\t[INFO] Updating database with details of inference.")
             update_query = (
                 f"INSERT INTO model_inference"
                 f"(image_id, name, satellite, date, "
@@ -506,10 +510,11 @@ def main(path_aois: str,
                 f"prediction_vec, session_data) "
                 f"VALUES ('{image_id}', '{name}', "
                 f"'{satellite}', '{date}', '{model_id}', "
-                f"'{filename_save.replace('gs://', 'https://storage.cloud.google.com/')}', "
-                f"'{filename_save_cont.replace('gs://', 'https://storage.cloud.google.com/')}', "
-                f"'{filename_save_vect.replace('gs://', 'https://storage.cloud.google.com/')}', "
-                f"'{session_data}')")
+                f"'{filename_save}', "
+                f"'{filename_save_cont}', "
+                f"'{filename_save_vect}', "
+                f"'{session_data}') "
+                f"ON CONFLICT (prediction) DO NOTHING;")
             db_conn.run_query(update_query, fetch = False)
 
             # Advance the progress bars
@@ -576,7 +581,8 @@ if __name__ == "__main__":
         default=create_gt.BRIGHTNESS_THRESHOLD,
         help="Brightness threshold for cloud predictions.[%(default)s].")
     ap.add_argument('--device-name', default="cuda",
-        help="Device name [%(default)s].")
+                    choices=["cpu", "cuda", "mps"],
+                    help="Device name [%(default)s].")
     ap.add_argument("--collection-name",
         choices=["Landsat", "S2"], default="S2",
         help="Collection name to predict on [%(default)s].")
