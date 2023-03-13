@@ -79,6 +79,25 @@ ALTER TABLE public.grid_loc_sample_ogc_fid_seq1 OWNER TO postgres;
 ALTER SEQUENCE public.grid_loc_sample_ogc_fid_seq1 OWNED BY public.grid_loc.ogc_fid;
 
 
+CREATE TABLE public.image_downloads (
+    image_id character varying NOT NULL,
+    patch_name character varying,
+    satellite character varying,
+    date date,
+    datetime character varying,
+    solarday date,
+    solardatetime character varying,
+    cloud_probability double precision,
+    valids double precision,
+    status integer DEFAULT 0, 
+    data_path character varying,
+    PRIMARY KEY(image_id)
+);
+
+
+ALTER TABLE public.image_downloads OWNER TO postgres;
+
+
 --
 -- Name: images_download; Type: TABLE; Schema: public; Owner: postgres
 --

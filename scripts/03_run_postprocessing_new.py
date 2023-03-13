@@ -548,7 +548,7 @@ if __name__ == "__main__":
          and args.ref_end_date is None) or
         (args.ref_start_date is None
          and args.ref_end_date is not None)):
-        ap.error("Both pre-flood start and end date must be provided.")
+        ap.error("Both reference start and end date must be provided.")
     ref_start_date = None
     ref_end_date = None
     if args.ref_start_date and args.ref_end_date:

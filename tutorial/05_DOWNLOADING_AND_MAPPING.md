@@ -51,17 +51,17 @@ python 01_download_images.py \
     --path-aois gs://floodmapper-demo/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
-    --preflood-start-date 2022-06-15 \
+    --preflood-start-date 2022-06-10 \
     --preflood-end-date 2022-06-20 \
     --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env
 
 # OR Query data by specifying a list of LGA names
-python 01_download_images.py \
+python 01_download_images_new.py \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
-    --preflood-start-date 2022-06-15 \
+    --preflood-start-date 2022-06-10 \
     --preflood-end-date 2022-06-20 \
     --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env
