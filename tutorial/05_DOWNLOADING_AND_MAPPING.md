@@ -167,15 +167,16 @@ python 02_run_inference.py \
     --overwrite
 
 # OR start mapping using a list of LGAs
-python 02_run_inference.py \
+python 02_run_inference_new.py \
     --lga-names Newcastle,Maitland,Cessnock \
-    --start-date 2022-06-15 \
+    --start-date 2022-06-10 \
     --end-date 2022-07-24 \
     --model-name WF2_unet_rbgiswirs \
     --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env \
     --collection-name S2 \
     --distinguish-flood-traces \
+    --device-name mps \
     --overwrite
 ```
 

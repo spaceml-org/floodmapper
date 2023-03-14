@@ -234,19 +234,30 @@ def main(path_aois,
         write_aoi_path = os.path.join(session_path, aoi).replace("\\", "/")
 
         # Query the DB for vector files to be processed
-        query = (f"SELECT DISTINCT prediction_vec "
-                 f"FROM model_inference "
-                 f"WHERE name = %s "
-                 f"AND satellite IN %s ")
         sat_dict ={"all"     : ('Landsat', 'S2'),
                    'Landsat' : ('Landsat',),
                    'S2'      : ('S2',)}
-        data = [aoi, sat_dict[collection_name]]
+        query = (f"SELECT DISTINCT data_path ")
+                 f"FROM inference "
+                 f"WHERE patch_name = %s "
+                 f"AND satellite IN %s "
+                 f"AND mode = %s")
+        data = [aoi, sat_dict[collection_name], 'vect']
+
+        
+        #query = (f"SELECT DISTINCT prediction_vec "
+        #         f"FROM model_inference "
+        #         f"WHERE name = %s "
+        #         f"AND satellite IN %s ")
+        #data = [aoi, sat_dict[collection_name]]
+        
+        
         if not model_name == "all":
             query += f"AND model_id = %s"
             data.append(model_name)
         geojsons_df = db_conn.run_query(query, data, fetch=True)
-        geojsons_lst = [x for x in geojsons_df['prediction_vec'].values]
+        #geojsons_lst = [x for x in geojsons_df['prediction_vec'].values]
+        geojsons_lst = [x for x in geojsons_df['data_path'].values]
         geojsons_lst.sort(key=_key_sort)
         num_files = len(geojsons_lst)
         if num_files == 0:

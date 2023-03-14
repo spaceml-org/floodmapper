@@ -148,6 +148,23 @@ CREATE TABLE public.lgas_info (
 
 ALTER TABLE public.lgas_info OWNER TO postgres;
 
+
+CREATE TABLE public.inference (
+    image_id character varying,
+    patch_name character varying,
+    satellite character varying,
+    date date,
+    model_id character varying,
+    mode character varying,
+    status integer DEFAULT 0,
+    data_path character varying,
+    session_data json,
+    PRIMARY KEY(image_id, model_id, mode)
+);
+
+
+ALTER TABLE public.inference OWNER TO postgres;
+
 --
 -- Name: model_inference; Type: TABLE; Schema: public; Owner: postgres
 --
