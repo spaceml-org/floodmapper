@@ -18,7 +18,7 @@ import rasterio
 from ml4floods.data import save_cog, utils
 import numpy as np
 from datetime import datetime
-from tqdm import tqdm
+from tqdm import tqdm as tq
 import geopandas as gpd
 import pandas as pd
 import warnings
@@ -36,14 +36,32 @@ from db_utils import DB
 warnings.filterwarnings("ignore")
 
 
+def do_update_inference(db_conn, image_id, patch_name, satellite, date,
+                        model_id, mode, status=0, data_path=None,
+                        session_data=None):
+    """
+    Query to update the temporal table with a successful result.
+    """
+    query = (f"INSERT INTO inference"
+             f"(image_id, patch_name, satellite, date, model_id, "
+             f"mode, status, data_path, session_data) "
+             f"VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+             f"ON CONFLICT (image_id, model_id, mode) DO UPDATE "
+             f"SET status = %s, data_path = %s ;")
+    data = (image_id, patch_name, satellite, date, model_id,
+            mode, status, data_path, session_data,
+            status, data_path)
+    db_conn.run_query(query, data)
+
+
 def load_inference_function(
-        model_path:str,
-        device_name:str,
-        max_tile_size:int = 1024,
-        th_water:float = 0.5,
-        th_brightness:float = create_gt.BRIGHTNESS_THRESHOLD,
-        collection_name:str="S2",
-        distinguish_flood_traces:bool=False) -> Tuple[
+        model_path: str,
+        device_name: str,
+        max_tile_size: int = 1024,
+        th_water: float = 0.5,
+        th_brightness: float = create_gt.BRIGHTNESS_THRESHOLD,
+        collection_name: str="S2",
+        distinguish_flood_traces: bool=False) -> Tuple[
             Callable[[torch.Tensor], Tuple[torch.Tensor,torch.Tensor]],
             AttrDict]:
     """
@@ -178,23 +196,23 @@ def load_inference_function(
     return predict, config
 
 
-def check_exist(image_id, db_conn):
+
+
+def check_exist(db_conn, image_id, model_id):
     """
-    Check if the image exists in the database inference table.
+    Check if the vector prediction exists in the database inference table.
     """
-    img_query = '''
-    SELECT * FROM model_inference WHERE image_id = '{}';
-    '''.format(image_id)
-    df = db_conn.run_query(img_query, fetch= True)
+    query = (f"SELECT status, data_path FROM inference "
+             f"WHERE image_id = %s "
+             f"AND model_id = %s "
+             f"AND mode = %s ;")
+    data = (image_id, model_id, "vect")
+    df = db_conn.run_query(query, data, fetch=True)
     if len(df) > 0:
-        if (all(pd.notna(df['prediction']))
-            and all(pd.notna(df['prediction_cont']))
-            and all(pd.notna(df['prediction_vec']))):
+        row = df.iloc[0]
+        if row.status == 1 and pd.notna(row.data_path):
             return True
-        else:
-            return False
-    else:
-        return False
+    return False
 
 
 def vectorize_outputv1(prediction: np.ndarray,
@@ -362,42 +380,23 @@ def main(path_aois: str,
             collection_name=collection_name,
             distinguish_flood_traces=distinguish_flood_traces)
 
-    # Set debugging ON
-    #import pdb;pdb.set_trace()
-
     # Select the downloaded images to run inference on
-    img_query = (f"SELECT * FROM images_download "
-                 f"WHERE satellite = '{collection_name}' "
-                 f"AND name in {tuple(aois_list)} "
-                 f"AND date >= '{start_date}' "
-                 f"AND date <= '{end_date}'")
-    img_df = db_conn.run_query(img_query, fetch = True)
+    query = (f"SELECT * FROM image_downloads "
+             f"WHERE satellite = %s "
+             f"AND patch_name IN %s "
+             f"AND date >= %s "
+             f"AND date <= %s "
+             f"AND status = 1 ;")
+    data = (collection_name, tuple(aois_list), start_date, end_date)
+    img_df = db_conn.run_query(query, data, fetch = True)
     num_rows = len(img_df)
-    print(f"[INFO] Entries for {num_rows} images in the DB.")
-    img_df = img_df[img_df.downloaded == True]
-    num_rows = len(img_df)
-    print(f"[INFO] Of these, {num_rows} have been downloaded.")
-    images_predict = img_df.gcp_filepath.values.tolist()
+    print(f"[INFO] Entries for {num_rows} downloaded images in the DB.")
+    images_predict = img_df.data_path.values.tolist()
     images_predict.sort(key = lambda x:
-                            os.path.splitext(os.path.basename(x))[0])
-    if len(images_predict) == 0:
+                        os.path.splitext(os.path.basename(x))[0])
+    num_images = len(images_predict)
+    if num_images == 0:
         sys.exit("[WARN] No images matching selection - exiting.")
-
-    # Model inference monitoring progress bars
-#    tasks_df = df[df['downloaded'] == True].copy()
-#    batch_bar = tqdm(total=len(tasks_df),
-#                     dynamic_ncols=True,
-#                     leave=False,
-#                     position=0,
-#                     desc="All Tasks",
-#                     colour="GREEN")
-#    grid_bars = {}
-#    for name, gdf in tasks_df.groupby(by='name'):
-#        grid_bars[name] = tqdm(total=len(gdf),
-#                           dynamic_ncols=True,
-#                           leave=True,
-#                           position=0,
-#                           desc=name)
 
     # Construct the session data JSON - later saved in the DB with each image
     session_data = construct_session_data()
@@ -405,7 +404,7 @@ def main(path_aois: str,
     # Process each image in turn
     files_with_errors = []
     print(f"[INFO] {len(images_predict)} images queued for inference. ")
-    for total, filename in enumerate(images_predict):
+    for total, filename in tq(enumerate(images_predict), total=num_images):
 
         # Compute folder name to save the predictions if not provided
         output_folder_grid = os.path.dirname(os.path.dirname(filename))
@@ -429,51 +428,38 @@ def main(path_aois: str,
         image_id = "_".join([name, satellite, date])
 
         # Print a title
-        print("\n" + "-"*80 + "\n")
-        print(f"PROCESSING IMAGE '{image_id}' "
+        tq.write("\n" + "-"*80 + "\n")
+        tq.write(f"PROCESSING IMAGE '{image_id}' "
               f"({total + 1}/{len(images_predict)})\n"
               f"\tModel Name: {experiment_name}\n"
               f"\tTimestamp:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
         # Skip existing images, unless overwrite flag is True
-        if not overwrite and check_exist(image_id, db_conn):
-            print(f"\tResult already exists in database ... skipping.")
-            print(f"\tUse '--overwrite' flag to force overwrite.")
+        if not overwrite and check_exist(db_conn, image_id, experiment_name):
+            tq.write(f"\tResult already exists in database ... skipping.")
+            tq.write(f"\tUse '--overwrite' flag to force overwrite.")
             continue
 
         try:
             # Load the image, WCS transform and CRS from GCP
-            print("\tLoading image from GCP ... ", end="")
+            tq.write("\tLoading image from GCP ... ", end="")
             channels = get_channel_configuration_bands(
                 config.data_params.channel_configuration,
-                collection_name=collection_name,as_string=True)
+                collection_name=collection_name, as_string=True)
             torch_inputs, transform = \
                 dataset.load_input(filename, window=None, channels=channels)
             with rasterio.open(filename) as src:
                 crs = src.crs
-            print("OK")
+            tq.write("OK")
 
             # Run inference on the image
-            print("\tRunning inference on the image ... ", end="")
+            tq.write("\tRunning inference on the image ... ", end="")
             prediction, pred_cont = inference_function(torch_inputs)
             prediction = prediction.cpu().numpy()
             pred_cont = pred_cont.cpu().numpy()
-            print("OK")
+            tq.write("OK")
 
-            # Save data as vectors
-            print("\tVectorising prediction ... ", end="")
-            data_out = vectorize_outputv1(prediction, crs, transform)
-            print("OK")
-            if data_out is not None:
-                if not filename_save_vect.startswith("gs"):
-                    fs.makedirs(os.path.dirname(filename_save_vect),
-                                exist_ok=True)
-                utils.write_geojson_to_gcp(filename_save_vect, data_out)
-                print(f"\tSaved vectors to:\n\t{filename_save_vect}")
-            else:
-                print("\t[WARN] Vector data was NONE.")
-
-            # Save data as COG GeoTIFF
+            # Save prediction to bucket as COG GeoTIFF
             profile = {"crs": crs,
                        "transform": transform,
                        "RESAMPLING": "NEAREST",
@@ -486,50 +472,81 @@ def main(path_aois: str,
                               tags={"invalid":0, "land":1, "water":2,
                                     "cloud":3 , "trace":4,
                                     "model": experiment_name})
-            print(f"\tSaved prediction to:\n\t{filename_save}")
+            tq.write(f"\tSaved prediction to:\n\t{filename_save}")
+
+            # Update the database with a successful result
+            tq.write(f"\tUpdating database with successful result.")
+            do_update_inference(db_conn,
+                                image_id,
+                                name,
+                                satellite,
+                                date,
+                                model_id,
+                                "pred",
+                                status=1,
+                                data_path=filename_save)
+
+            # Save probalistic prediction to bucket
+            profile["nodata"] = -1
             if not filename_save_cont.startswith("gs"):
                 fs.makedirs(os.path.dirname(filename_save_cont), exist_ok=True)
             if pred_cont.shape[0] == 2:
                 descriptions = ["clear/cloud", "land/water"]
             else:
                 descriptions = ["prob_clear","prob_water", "prob_cloud"]
-            profile["nodata"] = -1
             save_cog.save_cog(pred_cont, filename_save_cont,
                               profile=profile.copy(),
                               descriptions=descriptions,
                               tags={"model": experiment_name})
-            print(f"\tSaved cont prediction to:\n\t{filename_save_cont}")
+            tq.write(f"\tSaved cont prediction to:\n\t{filename_save_cont}")
 
-            # Update the database with details of the image
-            # TODO: Check if we need to convert to UPSERT
-            print("\t[INFO] Updating database with details of inference.")
-            update_query = (
-                f"INSERT INTO model_inference"
-                f"(image_id, name, satellite, date, "
-                f"model_id, prediction, prediction_cont, "
-                f"prediction_vec, session_data) "
-                f"VALUES ('{image_id}', '{name}', "
-                f"'{satellite}', '{date}', '{model_id}', "
-                f"'{filename_save}', "
-                f"'{filename_save_cont}', "
-                f"'{filename_save_vect}', "
-                f"'{session_data}') "
-                f"ON CONFLICT (prediction) DO NOTHING;")
-            db_conn.run_query(update_query, fetch = False)
+            # Update the database with a successful result
+            tq.write(f"\tUpdating database with successful result.")
+            do_update_inference(db_conn,
+                                image_id,
+                                name,
+                                satellite,
+                                date,
+                                model_id,
+                                "cont",
+                                status=1,
+                                data_path=filename_save_cont)
 
-            # Advance the progress bars
-#            grid_bars[name].update()
-#            batch_bar.update()
+            # Convert the mask to vector polygons
+            tq.write("\tVectorising prediction ... ", end="")
+            data_out = vectorize_outputv1(prediction, crs, transform)
+            tq.write("OK")
+            if data_out is not None:
+                if not filename_save_vect.startswith("gs"):
+                    fs.makedirs(os.path.dirname(filename_save_vect),
+                                exist_ok=True)
+                utils.write_geojson_to_gcp(filename_save_vect, data_out)
+                tq.write(f"\tSaved vectors to:\n\t{filename_save_vect}")
+            else:
+                tq.write("\t[WARN] Vector data was NONE.")
+
+            # Update the database with a successful result
+            tq.write(f"\tUpdating database with successful result.")
+            do_update_inference(db_conn,
+                                image_id,
+                                name,
+                                satellite,
+                                date,
+                                model_id,
+                                "vect",
+                                status=1,
+                                data_path=filename_save_vect)
 
         except Exception:
-            print("\n\t[ERR] Processing failed!\n")
+            tq.write("\n\t[ERR] Processing failed!\n")
             traceback.print_exc(file=sys.stdout)
             files_with_errors.append(filename)
 
     # Clean up
     if len(files_with_errors) > 0:
-        print(f"[WARN] Processing failed on some files:\n"
-              f"{files_with_errors}")
+        print(f"[WARN] Processing failed on some files:\n")
+        for e in files_with_errors:
+            print(e)
     db_conn.close_connection()
 
 

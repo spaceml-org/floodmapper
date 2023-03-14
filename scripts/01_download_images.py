@@ -27,15 +27,14 @@ from db_utils import DB
 # DEBUG
 warnings.filterwarnings("ignore")
 
-
-def wait_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
+def monitor_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
     """
     Track active GEE download tasks and update database.
 
     Loops through the list of active Google Earth Engine tasks at a
-    cadence of 60s, checking if inactive tasks completed successfully,
-    or finished with an error. Updates the database with a 'COMPLETED'
-    flag, or saves the error message.
+    cadence of a few seconds, checking if inactive tasks completed
+    successfully, or finished with an error. Updates the database with
+    a completed [1] status, or saves the error message.
 
     Args:
         tasks: List of active GEE Tasks objects.
@@ -46,37 +45,46 @@ def wait_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
 
     """
 
-    # Build a list of active download tasks
+    num_tasks = len(tasks)
+    print(f"[INFO] Total number of tasks is {num_tasks}.")
+
+    # Track active tasks in this list. Assume all active initially.
     active_tasks = []
     for task in tasks:
-        if task.active():
-            active_tasks.append((task.status()["description"], task))
+        active_tasks.append((task.status()["description"], task))
 
     # Run while the active task list contains entries
     task_error_count = 0
     while len(active_tasks) > 0:
-        print("[INFO] %d tasks running" % len(active_tasks))
+        print("[INFO] %d active tasks running" % len(active_tasks))
+        print("[INFO] Polling status of actve tasks ...")
 
         # Loop through the tasks
         active_tasks_new = []
         for _i, (t, task) in enumerate(list(active_tasks)):
 
-            # Add active tasks to the new tasks list
+            # Add active tasks to the new task list and continue
             if task.active():
                 active_tasks_new.append((t, task))
                 continue
 
             # Check if inactive tasks have completed, or finished with
-            # an error. Mark as completed in the DB, or save error message.
+            # an error and set their status in the DB.
+            desc = task.status()["description"]
+            # Need to strip date from the image_id for permanent water layer
+            if "PERMANENTWATERJRC" in desc:
+                desc = desc[:-5]
+            query = (f"UPDATE image_downloads "
+                     f"SET status = %s "
+                     f"WHERE image_id = %s;")
             if task.status()["state"] != "COMPLETED":
-                print("[INFO] error in task {}:\n {}".format(t, task.status()))
+                print("\t[ERR] Error in task {}:\n {}".format(t, task.status()))
                 task_error_count += 1
+                data = (0, desc)
+                db_conn.run_query(query, data)
             elif task.status()["state"] == "COMPLETED":
-                desc = task.status()["description"]
-                query = (f"UPDATE images_download "
-                         f"SET in_progress = 0 "
-                         f"WHERE image_id = %s;")
-                data = (desc,)
+                print("\t[INFO] task {} completed.".format(t))
+                data = (1, desc)
                 db_conn.run_query(query, data)
 
         # Update the list of active tasks and pause for interval_s
@@ -104,16 +112,38 @@ def fix_landsat_gee_id(row):
     return row['gee_id']
 
 
+def do_update_download(db_conn, desc, name=None, constellation=None,
+                       solar_day=None, utcdatetime_save=None,
+                       solardatetime_save=None, cloud_probability=None,
+                       valids=None, status=0, data_path=None):
+    """
+    Query to update the download table with download in progress or complete.
+    """
+    query = (f"INSERT INTO image_downloads"
+             f"(image_id, patch_name, satellite, date, datetime, "
+             f"solarday, solardatetime, cloud_probability, valids, "
+             f"status, data_path)"
+             f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+             f"ON CONFLICT (image_id) DO UPDATE "
+             f"SET cloud_probability = %s, valids = %s, "
+             f"status = %s, data_path = %s")
+    data = (desc, name, constellation, solar_day,
+            utcdatetime_save, solar_day, solardatetime_save,
+            cloud_probability, valids, status, data_path,
+            cloud_probability, valids, status, data_path)
+    db_conn.run_query(query, data)
+
+
 def main(path_aois: str,
          lga_names: str,
          flood_start_date: datetime,
          flood_end_date: datetime,
-         preflood_start_date: datetime,
-         preflood_end_date: datetime,
-         threshold_clouds_flood: float,
-         threshold_clouds_preflood: float,
-         threshold_invalids_flood: float,
-         threshold_invalids_preflood: float,
+         ref_start_date: datetime = None,
+         ref_end_date: datetime = None,
+         threshold_clouds_flood: float = 0.95,
+         threshold_clouds_ref: float = 0.10,
+         threshold_invalids_flood: float = 0.7,
+         threshold_invalids_ref: float = 0.1,
          collection_placeholder: str = "all",
          bucket_uri: str = "gs://floodmapper-demo",
          path_env_file: str = "../.env",
@@ -121,6 +151,11 @@ def main(path_aois: str,
          channel_configuration:str = "bgriswirs",
          force_s2cloudless: bool = True,
          grid_name_filter: str = ""):
+
+    # Only download reference data if given reference dates
+    do_download_ref = True
+    if  ref_start_date is None or ref_end_date is None:
+        do_download_ref = False
 
     # Set the flood start and end times
     today_date =  datetime.today().astimezone(flood_start_date.tzinfo)
@@ -134,16 +169,17 @@ def main(path_aois: str,
     period_flood_start = flood_start_date
     period_flood_end = flood_end_date
 
-    # Set the pre-flood start and end times
-    if preflood_end_date > today_date:
-        print("[WARN] Pre-flood end date set to future time. Setting today.")
-        preflood_end_date = today_date
-    if preflood_start_date > today_date:
-        sys.exit("[ERR] Pre-flood start date set to future time!")
-    flood_duration = preflood_end_date - preflood_start_date
-    print("[INFO] Pre-flood duration: {}.".format(flood_duration))
-    period_preflood_start = preflood_start_date
-    period_preflood_end = preflood_end_date
+    # Set the reference start and end times
+    if do_download_ref:
+        if ref_end_date > today_date:
+            print("[WARN] Ref end date set to future time. Setting today.")
+            ref_end_date = today_date
+        if ref_start_date > today_date:
+            sys.exit("[ERR] Ref start date set to future time!")
+        _duration = ref_end_date - ref_start_date
+        print("[INFO] Reference duration: {}.".format(_duration))
+        period_ref_start = ref_start_date
+        period_ref_end = ref_end_date
 
     # Parse the bucket URI and name
     rel_grid_path = "0_DEV/1_Staging/GRID"
@@ -221,36 +257,40 @@ def main(path_aois: str,
     ee_collection_placeholder  = "both" if collection_placeholder == "all" \
         else collection_placeholder
 
-    # Query data available AFTER the flood event and set pre/post label
+    # Query data available during the flood event and set label
     print("[INFO] Querying Google Earth Engine for flooding images.")
-    images_available_gee_postflood = ee_query.query(
+    images_available_gee_flood = ee_query.query(
         area_of_interest,
         period_flood_start,
         period_flood_end,
         producttype=ee_collection_placeholder,
         return_collection=False,
         add_s2cloudless = force_s2cloudless)
-    images_available_gee_postflood["prepost"] = "post"
-    num_post_images = len(images_available_gee_postflood)
-    print(f"[INFO] Found {num_post_images} flooding images on GEE archive.")
+    images_available_gee_flood["mode"] = "flood"
+    num_flood_images = len(images_available_gee_flood)
+    print(f"[INFO] Found {num_flood_images} flooding images on GEE archive.")
 
-    # Query data available BEFORE the flood event
-    print("[INFO] Querying Google Earth Engine for pre-flooding images.")
-    images_available_gee_preflood = ee_query.query(
-        area_of_interest,
-        period_preflood_start,
-        period_preflood_end,
-        producttype=ee_collection_placeholder,
-        return_collection=False,
-        add_s2cloudless=True)
-    images_available_gee_preflood["prepost"] = "pre"
-    num_pre_images = len(images_available_gee_preflood)
-    print(f"[INFO] Found {num_pre_images} pre-flood images on GEE archive.")
+    # Query data available during reference time-period
+    if do_download_ref:
+        print("[INFO] Querying Google Earth Engine for pre-flooding images.")
+        images_available_gee_ref = ee_query.query(
+            area_of_interest,
+            period_ref_start,
+            period_ref_end,
+            producttype=ee_collection_placeholder,
+            return_collection=False,
+            add_s2cloudless=True)
+        images_available_gee_ref["mode"] = "ref"
+        num_ref_images = len(images_available_gee_ref)
+        print(f"[INFO] Found {num_ref_images} pre-flood images on GEE archive.")
 
-    # Merge pre and post download list
-    images_available_gee = pd.concat([images_available_gee_postflood,
-                                      images_available_gee_preflood],
-                                     ignore_index=False)
+    # Merge reference and flood download list
+    if do_download_ref:
+        images_available_gee = pd.concat([images_available_gee_flood,
+                                          images_available_gee_ref],
+                                         ignore_index=False)
+    else:
+        images_available_gee = images_available_gee_flood
     total_images = len(images_available_gee)
     print(f"[INFO] Total Images = {total_images}.")
 
@@ -274,13 +314,6 @@ def main(path_aois: str,
     #                          if x['prepost'] == 'pre')
     #    aois_images = aois_images.reset_index(drop=True)
 
-    # Query all the images that have already been downloaded
-    query = (f"SELECT image_id, date, downloaded, valids, "
-             f"cloud_probability, in_progress "
-             f"FROM images_download")
-    img_tab = db_conn.run_query(query, fetch=True)
-
-
     #-------------------------------------------------------------------------#
     # At this point we have a master dataframe of images covering the area to
     # be mapped. It has the following columns:
@@ -303,120 +336,79 @@ def main(path_aois: str,
     #   'index_right'          ...
     #   'name'                 ... name of grid patch
     #   'lga_name22'           ... name of LGA covered by image
-    #
-    # We also have a snapshot of the images_download table in the database,
-    # showing the download status of existing images on the GCP bucket.
-    #
-    # img_tab:
-    #   'image_id'          ... <GRID#>_<SAT>_<DATE>
-    #   'date'              ...
-    #   'downloaded'        ... BOOL: has image been downloaded?
-    #   'valids'            ... fraction of non-blank pixels
-    #   'cloud_probability' ... % of obscuring cloud
-    #   'in_progress'       ... [0|1] is download in progress?
     #-------------------------------------------------------------------------#
 
     # List to record submitted GEE tasks
     tasks = []
 
     # Loop through the list of AVAILABLE images
-    for _i, ((name, solar_day, satellite, prepost), images_day_sat) \
-        in tq(enumerate(aois_images.groupby(["name", "solarday",
-                                             "satellite", "prepost"])),
-              total=num_images):
+    aois_grp = aois_images.groupby(["name", "solarday",
+                                    "satellite", "mode"])
+    num_groups = len(aois_grp)
+    print(f"[INFO] There are {num_groups} image groups (by day, satellite).")
+    for _i, ((name, solar_day, satellite, mode), images_day_sat) \
+        in tq(enumerate(aois_grp), total=num_groups):
 
         # Print a title
         tq.write("\n" + "-"*80 + "\n")
-        tq.write(f"PROCESSING {_i + 1}/{aois_images.shape[0]} \n"
+        tq.write(f"PROCESSING {_i + 1}/{num_groups} \n"
               f"\tPATCH  = '{name}' \n"
               f"\tSENSOR = {satellite} \n"
               f"\tDAY    = {solar_day} \n"
-              f"\tTAG    = {prepost}-flood \n")
+              f"\tTAG    = {mode} \n")
 
         try:
 
             constellation = "S2" if satellite.startswith("S2") else "Landsat"
 
-            # Parse the image name and unique description (desc).
+            # Parse the image name and unique description.
             # Desc = <name>_<constellation>_<solar day>
             # This is used to name the task in GEE.
-            # Check in the database if exists to avoid re-downloading
             fileNamePrefix = os.path.join(rel_grid_path,
                                           name,
                                           constellation,
                                           solar_day)
-            desc = f"{name}_{constellation}_{solar_day}"
-            exist = False
-            img_row = img_tab[(img_tab['image_id'] == desc)]
             tq.write(f"\t{fileNamePrefix}")
-
-            if len(img_row) > 0:
-                tq.write("\tImage found in database.")
-                tq.write("\tChecking download status ...", end="")
-
-                # Mark aborted downloads as not downloaded.
-                # Retriggers download for these rows.
-                img_row.loc[img_row['in_progress'] == 1,
-                                'downloaded'] = False
-                # Should only be one row, image_id is unique
-                assert len(img_row) == 1
-                ce = img_row.iloc[0] # Getting the row
-                exist = True
-
-                downloaded = ce.get('downloaded').item()
-
-                # Skip if the image is already downloaded
-                if downloaded:
-                    tq.write("downloaded.")
-                    continue
-
-                # If the image is not downloaded, but is in the database,
-                # check if its valid for download under current thresholds.
-                else:
-                    tq.write("not downloaded.")
-                    tq.write("\tChecking DB-stored thresholds:")
-                    if prepost == "pre":
-                        thresh_valid = (1 - threshold_invalids_preflood)
-                        thresh_cloud = threshold_clouds_preflood
-                    else:
-                        thresh_valid = (1 - threshold_invalids_flood)
-                        thresh_cloud = threshold_clouds_flood
-                    tq.write("\t\tVALID PIXELS: {:.2f} > [{:.2f}] ?  "\
-                          .format(ce["valids"], thresh_valid), end="")
-                    if ce["valids"] < thresh_valid:
-                        tq.write(f"TOO LOW")
-                        continue
-                    else:
-                        tq.write("OK")
-                    tq.write("\t\tCLOUD PIXELS: {:.2f} < [{:.2f}] ?  "\
-                          .format(ce["cloud_probability"]/100, thresh_cloud),
-                          end="")
-                    if ce["cloud_probability"]/100 > thresh_cloud:
-                        tq.write(f"TOO HIGH")
-                        continue
-                    else:
-                        tq.write("OK")
+            desc = f"{name}_{constellation}_{solar_day}"
 
             # Advance to next image if download task is already running
             if ee_download.istaskrunning(desc):
                 tq.write(f"\tdownload task already running '{desc}'.")
                 continue
 
+            # Query the status of the image in database
+            # Status:
+            #        0 = not downloaded (e.g., because of failed threshold)
+            #        1 = downloaded successfully
+            #       -1 = download in progress or failed
+            do_download = False
+            tq.write("\tQuerying database for existing image.")
+            query = (f"SELECT image_id, status "
+                     f"FROM image_downloads "
+                     f"WHERE image_id = %s;")
+            data = (desc,)
+            img_row = db_conn.run_query(query, data, fetch=True)
+
+            # If an entry exists
+            if len(img_row) > 0:
+                tq.write("\tImage found in database.")
+                tq.write("\tChecking download status ... ", end="")
+                img_row = img_row.iloc[0]
+
+                # Skip if already confirmed downloaded (status = 1)
+                if img_row.status == 1:
+                    tq.write("downloaded.")
+                    tq.write("\tSkipping existing image.")
+                    continue
+                else:
+                    tq.write("NOT downloaded.")
+                    tq.write("\tWill process as normal.")
+
             # Address current grid position and calculate overlap with grid
             polygon_grid = aois_indexed.loc[name, "geometry"]
             polygon_images_sat = images_day_sat.geometry.unary_union
             valid_percentage = (polygon_grid.intersection(polygon_images_sat)\
                                 .area / polygon_grid.area)
-
-            # Check overlapping percentage and skip low overlap images
-            #if prepost == "pre":
-            #    if valid_percentage < threshold_invalids_preflood:
-            #        tq.write(f"\tImage has low overlap ... skipping.")
-            #        continue
-            #else:
-            #    if valid_percentage < threshold_invalids_flood:
-            #        tq.write(f"\tImage has low overlap ... skipping.")
-            #        continue
 
             # Format variables for use with GEE
             polygon_grid_ee = ee.Geometry(mapping(polygon_grid))
@@ -474,12 +466,12 @@ def main(path_aois: str,
                     {"cloud_probability": image.get("cloud_probability"),
                      "valids": image.get("valids")}).getInfo()
 
-            # Re-apply latest filters for cloud cover and swath overlap
+            # Apply filters for cloud cover and swath overlap
             download = True
             tq.write("\tChecking against latest thresholds:")
-            if prepost == "pre":
-                thresh_valid = (1 - threshold_invalids_preflood)
-                thresh_cloud = threshold_clouds_preflood
+            if mode == "ref":
+                thresh_valid = (1 - threshold_invalids_ref)
+                thresh_cloud = threshold_clouds_ref
             else:
                 thresh_valid = (1 - threshold_invalids_flood)
                 thresh_cloud = threshold_clouds_flood
@@ -504,8 +496,9 @@ def main(path_aois: str,
             solardatetime_save = images_day_sat.solardatetime.mean()
 
             # Download Execution Block ---------------------------------------#
-
+            status = 0
             if download:
+                status = -1
                 # Get CRS
                 lon, lat = list(polygon_grid.centroid.coords)[0]
                 crs = ee_download.convert_wgs_to_utm(lon=lon, lat=lat)
@@ -529,65 +522,26 @@ def main(path_aois: str,
                     maxPixels=5_000_000_000)
                 task.start()
                 tasks.append(task)
+            else:
+                tq.write(f"\n\tWILL NOT DOWNLOAD THE IMAGE.\n")
+            num_tasks = len(tasks)
+            tq.write(f"\t[INFO] Currently {num_tasks} in the task list.")
 
             # Database Update block ------------------------------------------#
 
-            download_url = os.path.join(bucket_uri, rel_grid_path,
-                                        name, constellation,
-                                        f"{solar_day}.tif")
+            data_path = os.path.join(bucket_uri, rel_grid_path,
+                                     name, constellation,
+                                     f"{solar_day}.tif")
 
-            if exist:
-                # Case : Failed thresholds last time, but now it is OK
-                if download:
-                    tq.write("\tUpdating database with download in progress.")
-                    insert_query = (f"UPDATE images_download "
-                                    f"SET downloaded = TRUE, "
-                                    f"gcp_filepath = '{download_url}'  "
-                                    f"WHERE image_id = '{desc}';")
-                    db_conn.run_query(insert_query, fetch=False)
-
-                # Case : Failed thresholds last time, and it is still failing
-                else:
-                    continue
-            else:
-                # Case : Image is new and it is OK
-                if download:
-                    tq.write("\tUpdating DB with new download in progress.")
-                    insert_query = (f"INSERT INTO images_download"
-                                    f"(image_id, name, satellite, date, "
-                                    f"datetime, downloaded, gcp_filepath, "
-                                    f"cloud_probability, valids, "
-                                    f"solardatetime, solarday, in_progress) "
-                                    f"VALUES ('{desc}', '{name}', "
-                                    f"'{constellation}', '{solar_day}', "
-                                    f"'{utcdatetime_save}', TRUE, "
-                                    f"'{download_url}', "
-                                    f"'{info_ee['cloud_probability']}', "
-                                    f"'{info_ee['valids']}', "
-                                    f"'{solardatetime_save}', "
-                                    f"'{solar_day}', 1);")
-                    db_conn.run_query(insert_query, fetch = False)
-
-                # Case : Image is new and it is not OK
-                else:
-                    tq.write("\tUpdating database with skipped download.")
-                    insert_query = (f"INSERT INTO images_download"
-                                    f"(image_id, name, satellite, date, "
-                                    f"datetime, downloaded, "
-                                    f"cloud_probability, valids, "
-                                    f"solardatetime, solarday, in_progress) "
-                                    f"VALUES ('{desc}', '{name}', "
-                                    f"'{constellation}', '{solar_day}', "
-                                    f"'{utcdatetime_save}', FALSE, "
-                                    f"'{info_ee['cloud_probability']}', "
-                                    f"'{info_ee['valids']}', "
-                                    f"'{solardatetime_save}', "
-                                    f"'{solar_day}', 0);")
-                    db_conn.run_query(insert_query, fetch = False)
+            tq.write("\tUpdating database with image details.")
+            do_update_download(db_conn, desc, name, constellation,
+                               solar_day, utcdatetime_save, solardatetime_save,
+                               info_ee['cloud_probability'], info_ee['valids'],
+                               status, data_path)
 
         except Exception as e:
             warnings.warn(f"Failed {_i} {name} {solar_day} "
-                          f"{satellite} {prepost}")
+                          f"{satellite} {mode}")
             traceback.print_exc(file=sys.stdout)
 
     # END OF IMAGE LOOP ------------------------------------------------------#
@@ -603,38 +557,56 @@ def main(path_aois: str,
         print(f"Processing Patch: '{aoi_geom.name}'\n")
 
         try:
-            image_id = (f"{aoi_geom.name}_PERMANENTWATERJRC_"
-                        f"{flood_start_date.year}")
-            if image_id in img_tab['image_id'].values:
-                print("\tWater layer already downloaded")
+            image_id = (f"{aoi_geom.name}_PERMANENTWATERJRC")
+            print("\tQuerying database for existing image.")
+            query = (f"SELECT image_id, status, valids, "
+                     f"cloud_probability, valids "
+                     f"FROM image_downloads "
+                     f"WHERE image_id = %s;")
+            data = (image_id,)
+            img_row = db_conn.run_query(query, data, fetch=True)
+            status = 0
+            if len(img_row) > 0:
+                print("\tImage found in database.")
+                print("\tChecking download status in DB ... ")
+                img_row = img_row.iloc[0]
+                status = img_row.status
+            if status == 1:
+                tq.write("\tImage already downloaded.")
                 continue
+            else:
+                tq.write("\tImage NOT already downloaded.")
             lon, lat = list(aoi_geom.geometry.centroid.coords)[0]
             crs = ee_download.convert_wgs_to_utm(lon=lon, lat=lat)
             folder_dest_permament = os.path.join(bucket_grid_path,
                                                  aoi_geom.name,
                                                  "PERMANENTWATERJRC")
-            file_dest_permanent = os.path.join(folder_dest_permament,
-                                               f"{flood_start_date.year}.tif")
-            # Start download tasks on GEE. Returns a list of active tasks.
-            print("\n\tSUBMITTING DOWNLOAD TASK TO GOOGLE EARTH ENGINE\n")
+
+            # Command the latest permanent water layer be downloaded.
+            # Method returns a GEE task if successful, or None otherwise.
+            print("\tCommanding download of permanent water layer.")
             task_permanent = ee_download.download_permanent_water(
                 aoi_geom.geometry,
                 date_search=flood_start_date,
                 path_bucket=folder_dest_permament,
-                name_task=f"PERMANENTWATERJRC_{aoi_geom.name}",
+                name_task=f"{aoi_geom.name}_PERMANENTWATERJRC",
                 crs=crs)
+
             # Append download tasks to the task list and update in the database
             if task_permanent is not None:
+                print("\n\tSUBMITTED DOWNLOAD TASK TO GOOGLE EARTH ENGINE\n")
                 tasks.append(task_permanent)
-                print("\tUpdating database with new download in progress.")
-                insert_query = (f"INSERT INTO images_download"
-                                f"(image_id, name, satellite, date, "
-                                f"downloaded, gcp_filepath, in_progress) "
-                                f"VALUES('{image_id}', '{aoi_geom.name}', "
-                                f"'PERMANENTWATERJRC', "
-                                f"'{flood_start_date.year}-01-01', TRUE, "
-                                f"'{file_dest_permanent}', 1);")
-                db_conn.run_query(insert_query)
+                do_update_download(db_conn,
+                                   image_id,
+                                   name,
+                                   'PERMANENTWATERJRC',
+                                   f"{flood_start_date.year}-01-01",
+                                   None,
+                                   None,
+                                   None,
+                                   None,
+                                   -1,
+                                   folder_dest_permament)
 
         except Exception as e:
             warnings.warn(f"Failed PERMANENT WATER JRC {aoi_geom}")
@@ -643,7 +615,8 @@ def main(path_aois: str,
     # Create a JSON file with a master task list
     tasks_fname = datetime.now().strftime('%Y-%m-%d_%H.%M.%S') + ".json"
     print(f"\n[INFO] Preparing task list file '{tasks_fname}'. \n"
-          f"       Please wait while GEE is queried for task status.")
+          f"       Please wait while GEE is queried for task status.\n"
+          f"       This can take a little while  ...\n")
     tasks_dump = [t.status() for t in tasks]
     with open(tasks_fname, "w") as f:
         json.dump(tasks_dump, f, indent=2)
@@ -657,9 +630,8 @@ def main(path_aois: str,
           f"which can display a progress bars and time estimates.\n\n")
 
     # Now run the task monitor loop until tasks are done
-    wait_tasks(tasks, db_conn)
+    monitor_tasks(tasks, db_conn)
     db_conn.close_connection()
-
 
 if __name__ == '__main__':
     import argparse
@@ -688,21 +660,18 @@ if __name__ == '__main__':
         help="Start date of the flooding event (YYYY-mm-dd, UTC).")
     ap.add_argument('--flood-end-date', required=True,
         help="End date of the flooding event (YYYY-mm-dd UTC).")
-    ap.add_argument('--preflood-start-date', required=True,
+    ap.add_argument('--ref-start-date', required=False,
         help="Start date of the unflooded time range (YYYY-mm-dd, UTC).")
-    ap.add_argument('--preflood-end-date', required=True,
+    ap.add_argument('--ref-end-date', required=False,
         help="End date of the unflooded time range (YYYY-mm-dd, UTC).")
-    # TODO: make preflood dates mutually inclusive
-    # https://stackoverflow.com/questions/19414060/
-    #         argparse-required-argument-y-if-x-is-present
-    ap.add_argument('--threshold-clouds-preflood', default=.1, type=float,
-        help="Discard pre-flood images with > cloud fraction [%(default)s].")
     ap.add_argument('--threshold-clouds-flood', default=.95, type=float,
         help="Discard flood images with > cloud fraction [%(default)s].")
-    ap.add_argument('--threshold-invalids-preflood', default=.1, type=float,
-        help="Discard pre-flood images with > blank fraction [%(default)s].")
+    ap.add_argument('--threshold-clouds-ref', default=.1, type=float,
+        help="Discard reference images with > cloud fraction [%(default)s].")
     ap.add_argument('--threshold-invalids-flood', default=.7, type=float,
         help="Discard flood images with > blank fraction [%(default)s].")
+    ap.add_argument('--threshold-invalids-ref', default=.1, type=float,
+        help="Discard reference images with > blank fraction [%(default)s].")
     ap.add_argument("--channel-configuration",
         default="bgriswirs", choices=["bgriswirs", "all"],
         help="Channel configuration requested [%(default)s].")
@@ -715,7 +684,7 @@ if __name__ == '__main__':
     ap.add_argument("--path-env-file", default="../.env",
         help="Path to the hidden credentials file [%(default)s].")
     ap.add_argument('--only-one-previous', action='store_true',
-        help="Download only one image in the pre-flood period.")
+        help="Download only one best image in the reference period.")
     ap.add_argument('--noforce-s2cloudless', action='store_true',
         help="Do not force s2cloudless product in S2 images.")
     ap.add_argument('--grid-name', default="",
@@ -730,22 +699,30 @@ if __name__ == '__main__':
     flood_start_date, flood_end_date = sorted([_start, _end])
 
     # Parse the unflooded date range
-    _start = datetime.strptime(args.preflood_start_date, "%Y-%m-%d")\
-                              .replace(tzinfo=timezone.utc)
-    _end = datetime.strptime(args.preflood_end_date, "%Y-%m-%d")\
-                               .replace(tzinfo=timezone.utc)
-    preflood_start_date, preflood_end_date = sorted([_start, _end])
+    if ((args.ref_start_date is not None
+         and args.ref_end_date is None) or
+        (args.ref_start_date is None
+         and args.ref_end_date is not None)):
+        ap.error("Both reference start and end date must be provided.")
+    ref_start_date = None
+    ref_end_date = None
+    if args.ref_start_date and args.ref_end_date:
+        _start = datetime.strptime(args.ref_start_date, "%Y-%m-%d")\
+                         .replace(tzinfo=timezone.utc)
+        _end = datetime.strptime(args.ref_end_date, "%Y-%m-%d")\
+                       .replace(tzinfo=timezone.utc)
+        ref_start_date, ref_end_date = sorted([_start, _end])
 
     main(path_aois=args.path_aois,
          lga_names=args.lga_names,
          flood_start_date=flood_start_date,
          flood_end_date=flood_end_date,
-         preflood_start_date=preflood_start_date,
-         preflood_end_date=preflood_end_date,
+         ref_start_date=ref_start_date,
+         ref_end_date=ref_end_date,
          threshold_clouds_flood=args.threshold_clouds_flood,
-         threshold_clouds_preflood=args.threshold_clouds_preflood,
+         threshold_clouds_ref=args.threshold_clouds_ref,
          threshold_invalids_flood=args.threshold_invalids_flood,
-         threshold_invalids_preflood=args.threshold_invalids_preflood,
+         threshold_invalids_ref=args.threshold_invalids_ref,
          collection_placeholder=args.collection_name,
          bucket_uri=args.bucket_uri,
          path_env_file=args.path_env_file,

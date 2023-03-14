@@ -1,26 +1,18 @@
 import os
 import sys
 os.environ['USE_PYGEOS'] = '0'
-import numpy as np
-
-from ml4floods.data import utils
-from ml4floods.models import postprocess
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-from collections import defaultdict
 import traceback
-from tqdm import tqdm
 import warnings
 import geopandas as gpd
-from db_utils import DB
 import pandas as pd
 import psycopg2
+from tqdm import tqdm as tq
+from datetime import datetime, timezone
 
-
+from db_utils import DB
+from ml4floods.data import utils
+from ml4floods.models import postprocess
 from dotenv import load_dotenv
-from sql_queries import *
-
-#warnings.filterwarnings('ignore', 'pandas.Int64Index', FutureWarning)
 
 # DEBUG
 warnings.filterwarnings("ignore")
@@ -30,6 +22,7 @@ def _key_sort(x):
     """
     Sort by date (name of the file) and satellite.
     """
+
     date = os.path.splitext(os.path.basename(x))[0]
     satellite = os.path.basename(os.path.dirname(x))
     # Preference of Sentinel over Landsat
@@ -40,101 +33,105 @@ def _key_sort(x):
     return date + append
 
 
-def spatial_check_exist(filename, mode, db_conn):
+def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
+                        load_existing=False):
     """
-    Check if a file is marked as existing in the database by
-    querying if 'mode' column contains the 'filename' value.
-
-    Args:
-        filename: path to the file on GCP
-        mode: column name [preflood|postflood|prepostflood]
-    Returns:
-        True if entry exists, else False
+    Perform time-aggregation on a list of GeoJSONs.
     """
-    fquery = TEMPORAL_EXISTS.format(mode, filename)
-    df = db_conn.run_query(fquery, fetch= True)
-    if df.empty:
-        return False
-    return True
+    aggregate_floodmap = None
+    if load_existing:
+        try:
+            tq.write(f"\tLoad existing temporal aggregate map.")
+            aggregate_floodmap = utils.read_geojson_from_gcp(data_out_path)
+            return aggregate_floodmap
+        except Exception:
+            tq.write(f"\t[WARN] Failed! Proceeding to create new aggregation.")
+            aggregate_floodmap = None
+
+    try:
+        # Perform the time aggregation on the list of GeoJSONs
+        num_files = len(geojsons_lst)
+        tq.write(f"\tPerforming temporal aggregation of {num_files} files.")
+        aggregate_floodmap = postprocess.get_floodmap_post(geojsons_lst)
+
+        # Add the permanent water polygons
+        if permanent_water_map is not None:
+            tq.write(f"\tAdding permanent water layer.")
+            aggregate_floodmap = \
+                postprocess.add_permanent_water_to_floodmap(
+                    permanent_water_map,
+                    aggregate_floodmap,
+                    water_class="water")
+
+        # Save output to GCP
+        tq.write(f"\tSaving temporal aggregation to: \n\t{data_out_path}")
+        utils.write_geojson_to_gcp(data_out_path, aggregate_floodmap)
+
+    except Exception:
+        tq.write("\t[ERR] Temporal aggregation failed!\n")
+        traceback.print_exc(file=sys.stdout)
+        aggregate_floodmap = None
+    return aggregate_floodmap
 
 
-def do_temporal_aggregate(date_start, date_end, geojsons_lst, aoi, data_path,
-                          mode="postflood", permanent_water_map=None,
-                          overwrite=True):
+def do_update_temporal(db_conn, bucket_uri, session_code, aoi, model_name,
+                       flood_start_date, flood_end_date, mode, status,
+                       flood_path):
     """
-    Compute an aggregate water map from a time-series of predictions.
+    Query to update the temporal table with a successful result.
     """
+    query = (f"INSERT INTO postproc_temporal_new"
+             f"(bucket_uri, session, patch_name, model_name, "
+             f"date_start, date_end, mode, status, data_path) "
+             f"VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+             f"ON CONFLICT (session, patch_name, mode) DO UPDATE "
+             f"SET bucket_uri = %s, model_name = %s, date_start = %s, "
+             f"date_end = %s, data_path = %s, status = %s;")
+    data = (bucket_uri, session_code, aoi, model_name,
+            flood_start_date, flood_end_date, mode, status, flood_path,
+            bucket_uri, model_name, flood_start_date, flood_end_date,
+            flood_path, status)
+    db_conn.run_query(query, data)
 
-    # Choose operation variables: pre-flood, or post-flood
-    if mode == "postflood":
-        QUERY = POSTFLOOD_EXISTS
-    else:
-        QUERY = PREFLOOD_EXISTS
-        mode = "preflood"
 
-    # Select the geojsons by date range.
-    geojsons_sel = [g for g in geojsons_lst
-                    if (os.path.splitext(os.path.basename(g))[0]
-                        <= date_end)
-                    and (os.path.splitext(os.path.basename(g))[0]
-                         >= date_start)]
-    num_files = len(geojsons_sel)
-    if num_files == 0:
-        print(f"\t[WARN] No files selected in date range!")
-        return None
-
-    # Check in the DB if the output file exists. Load and return if apppropriate
-    aggregate_exists_df = \
-        db_conn.run_query(QUERY.format(aoi, data_path), fetch = True)
-    if not postflood_exists_df.empty and not overwrite:
-        aggregate_floodmap = utils.read_geojson_from_gcp(data_path)
-        print(f"\tLoaded existing temporal aggregate map for {aoi}.")
-        return aggregate_floodmap
-
-    # Perform the time aggregation on the list of GeoJSONs
-    # TODO: Explore different aggregation methods and return info
-    print(f"\t[INFO] Performing temporal aggregation of {num_files} files.")
-    aggregate_floodmap = postprocess.get_floodmap_post(geojsons_post)
-
-    # Add the permanent water polygons
-    if permanent_water_map is not None:
-        print(f"\tAdding permanent water layer.")
-        aggregate_floodmap = \
-            postprocess.add_permanent_water_to_floodmap(
-                permanent_water_map,
-                aggregate_floodmap,
-                water_class="water")
-
-    # Save output to GCP
-    print(f"\tSaving temporal aggregation to: \n{data_path}")
-    utils.write_geojson_to_gcp(data_path, aggregate_floodmap)
-
-    # Update 'postproc_temporal' with a successful aggregation
-    print(f"\tUpdating database with successful time aggregation.")
-    temporal_postproc_update_query = \
-        TEMPORAL_POSTPROC_UPDATE.format(
-            mode,
-            data_path,
-            aoi,
-            date_start,
-            date_end,
-            date_start,
-            date_end)
-    db_conn.run_query(temporal_postproc_update_query)
+def do_update_spatial(db_conn, bucket_uri, session_code, mode, data_path,
+                      flood_start_date=None, flood_end_date=None,
+                      ref_date_start=None, ref_date_end=None):
+    """
+    Query to update the spatial table with a successful result.
+    """
+    query = (f"INSERT INTO postproc_spatial_new"
+             f"(bucket_uri, session, flood_date_start, flood_date_end,"
+             f" ref_date_start, ref_date_end, mode, data_path, status) "
+             f"VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+             f"ON CONFLICT (session, mode) DO UPDATE "
+             f"SET bucket_uri = %s, flood_date_start = %s, "
+             f"flood_date_end = %s, ref_date_start = %s, ref_date_end = %s, "
+             f"mode = %s, data_path = %s, status = %s")
+    data = (bucket_uri, session_code, flood_start_date, flood_end_date,
+            ref_date_start, ref_date_end, mode, data_path, 1,
+            bucket_uri, flood_start_date, flood_end_date,
+            ref_start_date, ref_end_date, mode, data_path, 1)
+    db_conn.run_query(query, data)
 
 
 def main(path_aois,
          lga_names: str,
          flood_start_date: datetime,
          flood_end_date: datetime,
-         preflood_start_date: datetime,
-         preflood_end_date: datetime,
          session_code: str,
+         ref_start_date: datetime = None,
+         ref_end_date: datetime = None,
          bucket_uri: str = "gs://floodmapper-demo",
          path_env_file: str = "../.env",
          collection_name: str = "all",
          model_name: str = "all",
-         overwrite:bool=False):
+         overwrite: bool=False):
+
+    # Only create the inundation map if given reference dates
+    create_inundate_map = True
+    if  ref_start_date is None or ref_end_date is None:
+        create_inundate_map = False
 
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
@@ -152,16 +149,16 @@ def main(path_aois,
     grid_path = os.path.join(bucket_uri, rel_grid_path)
     bucket_name = bucket_uri.replace("gs://","").split("/")[0]
     session_path = os.path.join(bucket_uri, rel_operation_path, session_code)
-    fs_session = utils.get_filesystem(session_path)
     fs = utils.get_filesystem(grid_path)
     print(f"[INFO] Will read inference products from:\n\t{grid_path}")
     print(f"[INFO] Will write mapping products to:\n\t{session_path}")
 
     # Parse flood dates to strings (used as filename roots on GCP)
-    preflood_start_date_str = preflood_start_date.strftime("%Y-%m-%d")
-    preflood_end_date_str = preflood_end_date.strftime("%Y-%m-%d")
     flood_start_date_str = flood_start_date.strftime("%Y-%m-%d")
     flood_end_date_str = flood_end_date.strftime("%Y-%m-%d")
+    if create_inundate_map:
+        ref_start_date_str = ref_start_date.strftime("%Y-%m-%d")
+        ref_end_date_str = ref_end_date.strftime("%Y-%m-%d")
 
     # Connect to the FloodMapper DB
     db_conn = DB(dotenv_path=path_env_file)
@@ -210,395 +207,273 @@ def main(path_aois,
         sys.exit(f"[ERR] No valid grid patches selected - exiting.")
     aois_list = aois_data.name.to_list()
 
-    # DEBUG
-    #for _i, e in enumerate(set(aois_list)):
-    #    print(_i, e)
-
-    # Loop through the grid patches to be procesed
-    preflood_paths, post_flood_paths, prepost_flood_paths = [], [], []
-    #for _iaoi, aoi in tqdm(enumerate(aois_list), total = len(aois_list)):
+    # Initialise / reset the patches in the postproc_temporal table
     for _iaoi, aoi in enumerate(aois_list):
+        query = (f"INSERT INTO postproc_temporal_new"
+                 f"(bucket_uri, session, patch_name, mode) "
+                 f"VALUES(%s, %s, %s, %s) "
+                 f"ON CONFLICT (session, patch_name, mode) DO NOTHING;")
+        data = (bucket_uri, session_code, aoi, "flood")
+        db_conn.run_query(query, data)
+    query = (f"UPDATE postproc_temporal_new "
+             f"SET status = %s "
+             f"WHERE session = %s;")
+    data = (0, session_code)
+    db_conn.run_query(query, data)
 
-        # Print a title for grid patch being processed
-        print("\n" + "-"*80 + "\n")
-        print(f"PROCESSING TEMPORAL AGGREGATION {_iaoi + 1}/{len(aois_list)} \n"
-              f"\tPATCH  = '{aoi}' \n")
+    # Loop through the grid patches performing temporal aggregations
+    for _iaoi, aoi in tq(enumerate(aois_list), total = len(aois_list)):
 
-        # Form the paths to read and writefolders
-        grid_aoi_path = os.path.join(grid_path, aoi).replace("\\", "/")
-        session_aoi_path = os.path.join(session_path, aoi).replace("\\", "/")
+        tq.write("\n" + "-"*80 + "\n")
+        tq.write(f"PROCESSING TEMPORAL AGGREGATIONS "
+                 f"{_iaoi + 1}/{len(aois_list)}\n"
+                 f"\tPATCH  = '{aoi}'")
 
-        # Query the database for the vector files to be processed in this grid
-        sql_query_dict = {"all" : ('Landsat', 'S2'),
-                          'Landsat' : ('Landsat'),
-                          'S2' : ('S2')}
-        if model_name == 'all':
-            query = GEOJSON_ITER.format(aoi,
-                                        sql_query_dict[collection_name])
-        else:
-            query = GEOJSON_ITER_MODEL.format(aoi,
-                                              sql_query_dict[collection_name],
-                                              model_name)
-        geojsons_df = db_conn.run_query(query, fetch = True)
-        geojsons_lst = [x for x in geojsons_df['prediction_vec'].values]
+        # Form the paths to read and write folders on the bucket
+        read_aoi_path = os.path.join(grid_path, aoi).replace("\\", "/")
+        write_aoi_path = os.path.join(session_path, aoi).replace("\\", "/")
+
+        # Query the DB for vector files to be processed
+        sat_dict ={"all"     : ('Landsat', 'S2'),
+                   'Landsat' : ('Landsat',),
+                   'S2'      : ('S2',)}
+        query = (f"SELECT DISTINCT data_path "
+                 f"FROM inference "
+                 f"WHERE patch_name = %s "
+                 f"AND satellite IN %s "
+                 f"AND mode = %s")
+        data = [aoi, sat_dict[collection_name], 'vect']
+        if not model_name == "all":
+            query += f"AND model_id = %s"
+            data.append(model_name)
+        geojsons_df = db_conn.run_query(query, data, fetch=True)
+        geojsons_lst = [x for x in geojsons_df['data_path'].values]
         geojsons_lst.sort(key=_key_sort)
-
-        # DEBUG
-        #for row in geojsons_lst:
-        #    print(row)
-
-        # Create the paths of the output products
-        # <bucket_uri>/0_DEV/1_Staging/operational/
-        #                 <session_name>/<grid_patch_name>/pre_post_products/*
-        preflood_path = os.path.join(
-            session_aoi_path, "pre_post_products",
-            f"preflood_{preflood_end_date_str}.geojson" ).replace("\\","/")
-        preflood_paths.append(preflood_path)
-        post_flood_path = os.path.join(
-            session_aoi_path, "pre_post_products",
-            (f"postflood_{flood_start_date_str}"
-             f"_{flood_end_date_str}.geojson")).replace("\\", "/")
-        post_flood_paths.append(post_flood_path)
-        prepost_flood_path = os.path.join(
-            session_aoi_path, "pre_post_products",
-            (f"prepostflood_{preflood_end_date_str}"
-             f"_{flood_start_date_str}"
-             f"_{flood_end_date_str}.geojson")).replace("\\", "/")
-        prepost_flood_paths.append(prepost_flood_path)
-
-        # DEBUG (OK)
-        #print("preflood_path:\n", preflood_path)
-        #print("post_flood_path:\n", post_flood_path)
-        #print("prepost_flood_path:\n", prepost_flood_path)
-
-        # Insert an entry for the grid patch into
-        # the 'postproc_temporal' table.
-        # NOTE: Table does not enforce unique rows.
-        temporal_table_insert = \
-            TEMPORAL_POSTPROC_INSERT.format(
-                aoi,
-                model_name,
-                bucket_name,
-                session_code,
-                preflood_start_date_str,
-                preflood_end_date_str,
-                flood_start_date_str,
-                flood_end_date_str)
-        db_conn.run_query(temporal_table_insert)
-
-        # Select the flooding geojsons by date range.
-        geojsons_post = [g for g in geojsons_lst
-                         if (os.path.splitext(os.path.basename(g))[0]
-                             >= flood_start_date_str)
-                         and (os.path.splitext(os.path.basename(g))[0]
-                              <= flood_end_date_str)]
-
-        # DEBUG
-        #print("\n\tFLOODING INPUTS")
-        #for _i, e in enumerate(set(geojsons_post)):
-        #    print(_i, e)
-
-        if not overwrite:
-
-            # Check if the temporal aggregation has already been done:
-            # Query if the postproc_temporal table has entries for all products.
-            all_processed_query = CHECK_ALL_PROCESSED.format(
-                preflood_path,
-                post_flood_path,
-                prepost_flood_path)
-            all_processed_df = db_conn.run_query(all_processed_query,
-                                                 fetch=True)
-            all_processed = True if not all_processed_df.empty else False
-
-            if all_processed:
-                for geojson_post in geojsons_post:
-                    '''
-                    bug found :
-                    faout that we're searching for looks something like this
-                    gs://ml4floods_nema/0_DEV/1_Staging/GRID/GRID02948/
-                        WF2_unet_rbgiswirs_vec_prepost/S2/2022-10-15.geojson
-
-                    the folder WF2_unet_rbgiswirs_vec_prepost/ contains files
-                    that look like:
-                    2022-10-15_pre_2022-05-18 00:00:00_2022-09-15 00:00:00.geojson
-
-                    this condition will always fail.
-                    '''
-                    faout = geojson_post.replace("_vec/", "_vec_prepost/")
-                    if not fssession.exists(faout):
-                        all_processed = False
-                        break
-
-            if all_processed:
-                print("\t[INFO] Temporal aggregation already done - skipping.")
-                continue
-
-        if len(geojsons_post) == 0:
-            print(f"\t[WARN] No flooding files found for grid patch!")
+        num_files = len(geojsons_lst)
+        if num_files == 0:
+            tq.write(f"\t[WARN] No files found for grid patch!")
             continue
         else:
-            print(f"\tWill time-aggregate {len(geojsons_post)} files.")
+            tq.write(f"\tFound {num_files} total downloaded files (all times).")
 
-        # TEMPORAL AGGREGATION BLOCK ------------------------------------------#
+        # NOTE: At this point we have a list of predictions at ALL dates.
 
+        # Create the path to the output flood map
+        # <bucket_uri>/0_DEV/1_Staging/operational/
+        #                 <session_name>/<grid_patch_name>/pre_post_products/*
+        flood_path = os.path.join(
+            write_aoi_path, "pre_post_products",
+            (f"flood_{flood_start_date_str}"
+             f"_{flood_end_date_str}.geojson")).replace("\\", "/")
+
+        # Load vectorized JRC permanent water
+        tq.write(f"\tLoading permanent water layer.")
         try:
-            # TODO: fail gracefully if water layer not found
-            # Load vectorized JRC permanent water
-            print(f"\tLoading permanent water layer ... ")
-            permanent_water_floodmap = \
-                postprocess.load_vectorized_permanent_water(grid_aoi_path)
+            permanent_water_map = \
+                postprocess.load_vectorized_permanent_water(read_aoi_path)
+        except Exception:
+            tq.write("\t[WARN] Failed to load permanent water layer!")
+            permanent_water_map = None
 
-            ### COMPUTE ONE MAP FOR FLOODING PERIOD ---------------------------#
+        ### COMPUTE ONE MAP FOR FLOODING PERIOD ---------------------------#
 
-            # Check if the flood map exists in the database
-            postflood_exists_df = \
-                db_conn.run_query(POSTFLOOD_EXISTS.format(aoi, post_flood_path),
-                                  fetch = True)
-            if (not overwrite) and not postflood_exists_df.empty:
-                # Read the existing aggregated vector file
-                best_post_flood_data = \
-                    utils.read_geojson_from_gcp(post_flood_path)
-            else:
-                # Perform the time aggregation on the list of GeoJSONs
-                # TODO: Explore different aggregation methods and return info
-                print(f"\tPerforming temporal aggregation ...")
-                best_post_flood_data = \
-                    postprocess.get_floodmap_post(geojsons_post)
-                # Add the permanent water polygons
-                if permanent_water_floodmap is not None:
-                    print(f"\tAdding permanent water layer ...")
-                    best_post_flood_data = \
-                        postprocess.add_permanent_water_to_floodmap(
-                            permanent_water_floodmap,
-                            best_post_flood_data,
-                            water_class="water")
+        # Select the FLOOD geojsons by date range
+        geojsons_flood = [g for g in geojsons_lst
+                          if (os.path.splitext(os.path.basename(g))[0]
+                              >= flood_start_date_str)
+                          and (os.path.splitext(os.path.basename(g))[0]
+                               <= flood_end_date_str)]
+        num_files = len(geojsons_flood)
+        if num_files == 0:
+            tq.write(f"\t[WARN] No files found for flooding period!")
+            continue
+        else:
+            tq.write(f"\tFound {num_files} files during flood period.")
 
-                # Save output to GCP
-                print(f"\tSaving temporal aggregation to: \n"
-                      f"\t{post_flood_path}")
-                utils.write_geojson_to_gcp(post_flood_path,
-                                           best_post_flood_data)
+        # Perform the time aggregation on the list of GeoJSONs
+        best_flood_map = do_time_aggregation(geojsons_flood,
+                                             flood_path,
+                                             permanent_water_map,
+                                             not(overwrite))
 
-                # Update the 'postproc_temporal' with a successful aggregation
-                print(f"\tUpdating database with time aggregation.")
-                temporal_postproc_update_query = \
-                    TEMPORAL_POSTPROC_UPDATE.format(
-                        'postflood',
-                        post_flood_path,
-                        aoi,
-                        preflood_start_date_str,
-                        preflood_end_date_str,
-                        flood_start_date_str,
-                        flood_end_date_str)
-                db_conn.run_query(temporal_postproc_update_query)
+        # Update the with the details of the aggregate and set 'status' = 1
+        if best_flood_map is not None:
+            tq.write(f"\tUpdating database with succcessful result.")
+            do_update_temporal(db_conn, bucket_uri, session_code, aoi,
+                               model_name, flood_start_date, flood_end_date,
+                               "flood", 1, flood_path)
+        else:
+            tq.write(f"[ERR] Failed to create flood map for {aoi}, skipping.")
+            continue
 
-            ### COMPUTE ONE MAP FOR PRE-FLOOD PERIOD --------------------------#
+        if create_inundate_map:
 
-            # Select the pre-flood geojsons by date range.
-            # TODO this should take into account the timezone!
-            geojsons_pre = [g for g in geojsons_lst
+            ### COMPUTE REFERENCE MAP -------------------------------------#
+
+            # Create the path to the output reference maps
+            ref_path = os.path.join(
+                write_aoi_path, "pre_post_products",
+                f"ref_{ref_end_date_str}.geojson" ).replace("\\","/")
+
+            # Select the REFERENCE geojsons by date range
+            geojsons_ref = [g for g in geojsons_lst
                             if (os.path.splitext(os.path.basename(g))[0]
-                                <= preflood_end_date_str)
+                                <= ref_end_date_str)
                             and (os.path.splitext(os.path.basename(g))[0]
-                                 >= preflood_start_date_str)]
-            if len(geojsons_pre) == 0:
-                print(f"\tNo pre-flood files found for grid patch.")
+                                 >= ref_start_date_str)]
+            num_files = len(geojsons_ref)
+            if num_files == 0:
+                tq.write(f"\t[WARN] No files found for reference period!")
+                continue
+            else:
+                tq.write(f"\tFound {num_files} files during reference period.")
+
+            # Perform the time aggregation on the list of GeoJSONs
+            best_ref_map = do_time_aggregation(geojsons_ref,
+                                               ref_path,
+                                               permanent_water_map,
+                                               not(overwrite))
+            if best_ref_map is not None:
+                do_update_temporal(db_conn, bucket_uri, session_code, aoi,
+                                   model_name, ref_start_date, ref_end_date,
+                                   "ref", 1, ref_path)
+            else:
+                tq.write(f"[ERR] Failed to create ref map for {aoi}, skipping.")
                 continue
 
-            # Compute pre-flood data
-            preflood_exists_df = \
-                db_conn.run_query(PREFLOOD_EXISTS.format(aoi, preflood_path),
-                                  fetch = True)
-            if (not overwrite) and not preflood_exists_df.empty:
-                # Read the existing aggregated vector file
-                best_preflood_data = \
-                    utils.read_geojson_from_gcp(preflood_path)
-            else:
-                # Perform the time aggregation on the list of GeoJSONs
-                print(f"\tPerforming temporal aggregation ...")
-                best_preflood_data = postprocess.get_floodmap_pre(geojsons_pre)
-                # Add permanent water polygons
-                if permanent_water_floodmap is not None:
-                    print(f"\tAdding permanent water layer ...")
-                    best_preflood_data = \
-                        postprocess.add_permanent_water_to_floodmap(
-                            permanent_water_floodmap,
-                            best_preflood_data,
-                            water_class="water")
+            ### COMPUTE INUNDATION MAP ------------------------------------#
+
+            # Create the path to the output inundation maps
+            inundate_path = os.path.join(
+                write_aoi_path, "pre_post_products",
+                (f"inundate_{ref_end_date_str}"
+                 f"_{flood_start_date_str}"
+                 f"_{flood_end_date_str}.geojson")).replace("\\", "/")
+
+            try:
+                tq.write(f"\tCalculating inundation map.")
+                inundate_floodmap = \
+                    postprocess.compute_pre_post_flood_water(
+                        best_flood_map,
+                        best_ref_map)
 
                 # Save output to GCP
-                print(f"\tSaving temporal aggregation to: \n{preflood_path}")
-                utils.write_geojson_to_gcp(preflood_path, best_preflood_data)
+                tq.write(f"\tSaving innundation map to \n\t{inundate_path}")
+                utils.write_geojson_to_gcp(inundate_path,
+                                           inundate_floodmap)
 
-                # Update 'postproc_temporal' with a successful aggregation
-                print(f"\tUpdating database with time aggregation.")
-                temporal_postproc_update_query = \
-                    TEMPORAL_POSTPROC_UPDATE.format(
-                        'preflood',
-                        preflood_path,
-                        aoi,
-                        preflood_start_date_str,
-                        preflood_end_date_str,
-                        flood_start_date_str,
-                        flood_end_date_str)
-                db_conn.run_query(temporal_postproc_update_query)
+                # Update the database
+                do_update_temporal(db_conn, bucket_uri, session_code, aoi,
+                                   model_name, ref_start_date, flood_end_date,
+                                   "inundate", 1, inundate_path)
 
-            ### COMPUTE THE INUNDATION MAP -----------------------------------#
-
-            # Compute difference between pre and post floodmap for each grid
-            prepostflood_exists_df = \
-                db_conn.run_query(PREPOSTFLOOD_EXISTS.format(
-                    aoi, prepost_flood_path), fetch = True)
-            if overwrite or prepostflood_exists_df.empty:
-                print(f"\tComputing innundation map ...")
-                prepost_flood_data = \
-                    postprocess.compute_pre_post_flood_water(
-                        best_post_flood_data,
-                        best_preflood_data)
-
-                # Save output to GCP
-                print(f"\tSaving innundation map to \n{prepost_flood_path}")
-                utils.write_geojson_to_gcp(prepost_flood_path,
-                                           prepost_flood_data)
-                # Update 'postproc_temporal' with a successful calculation
-                temporal_postproc_update_query = \
-                    TEMPORAL_POSTPROC_UPDATE.format(
-                        'prepostflood',
-                        prepost_flood_data,
-                        aoi,
-                        preflood_start_date_str,
-                        preflood_end_date_str,
-                        flood_start_date_str,
-                        flood_end_date_str)
-                db_conn.run_query(temporal_postproc_update_query)
-
-            ### --------------------------------------------------------------#
-
-            # Compute prepost for each GRIDDED floodmap after the flood (debug)
-            for geojson_post in geojsons_post:
-                filename_out_vec_prepost = \
-                    geojson_post.replace("_vec/", "_vec_prepost/")
-                basename_file, ext = \
-                    os.path.splitext(os.path.basename(filename_out_vec_prepost))
-                basename_file = (f"{basename_file}_pre_"
-                                 f"{preflood_start_date_str}_"
-                                 f"{preflood_end_date_str}{ext}")
-
-                # Save individual post-flood in aoi/model/collection folder
-                filename_out_geojson_post = \
-                    os.path.join(os.path.dirname(filename_out_vec_prepost),
-                                 basename_file)
-                if (not overwrite) and fs.exists(filename_out_geojson_post):
-                    continue
-                if not filename_out_geojson_post.startswith("gs://"):
-                    fs.makedirs(os.path.dirname(filename_out_geojson_post),
-                                exist_ok=True)
-                floodmap_post_data = utils.read_geojson_from_gcp(geojson_post)
-                floodmap_post_data_pre_post = \
-                    postprocess.compute_pre_post_flood_water(
-                        floodmap_post_data, best_preflood_data)
-                print(f"\tSaving {filename_out_geojson_post}")
-                utils.write_geojson_to_gcp(filename_out_geojson_post,
-                                           floodmap_post_data_pre_post)
-
-        except Exception:
-            print("\t[ERR] Temporal aggregation failed!\n")
-            traceback.print_exc(file=sys.stdout)
+            except Exception:
+                tq.write(f"[ERR] Failed to create inundation map for {aoi}!")
+                traceback.print_exc(file=sys.stdout)
+                continue
 
     # SPATIAL AGGREGATION BLOCK ----------------------------------------------#
 
     # Print a title
     print("\n" + "="*80 + "\n")
-    print("Temporal aggregation complete! Proceeding to spatial aggregation")
+    print("Temporal aggregation complete! Proceeding to spatial aggregation.\n")
 
     if len(aois_list) == 1:
         print("[WARN] Only one grid patch found: will not perform aggregation.")
         return
 
-    # Form the paths to output the final data
-    path_aggregated_post = \
+    # Query the database for successful maps of each mode
+    query = (f"SELECT patch_name, mode, data_path "
+             f"FROM postproc_temporal_new "
+             f"WHERE session = %s AND status = %s;")
+    data = (session_code, 1)
+    temporal_df = db_conn.run_query(query, data, fetch=True)
+
+    # Reset the status in the spatial table
+    query = (f"UPDATE postproc_spatial_new "
+             f"SET status = %s "
+             f"WHERE session = %s;")
+    data = (0, session_code)
+    db_conn.run_query(query, data)
+
+    # Select the files for the FLOOD map
+    flood_df = temporal_df.loc[temporal_df["mode"] == "flood"]
+    geojsons_lst = [x for x in flood_df["data_path"].values]
+    num_files = len(geojsons_lst)
+    if num_files == 0:
+        print(f"\t[ERR] No flooding files to merge!")
+        return
+    else:
+        print(f"\tSelected {num_files} grid patches for flood map.")
+
+    # Path to final merged flood map
+    path_flood_merge = \
         os.path.join(session_path,
-                     (f"postflood_{flood_start_date_str}_"
-                      f"{flood_end_date_str}.geojson"))
-    path_aggregated_prepost = \
-        os.path.join(session_path,
-                     (f"prepostflood_{preflood_end_date_str}_"
-                      f"{flood_start_date_str}_"
+                     (f"flood_{flood_start_date_str}_"
                       f"{flood_end_date_str}.geojson"))
 
-    # Check if the spatially aggregated data exists in the database
-    postflood_exists_spatial_df = db_conn.run_query(
-        POSTFLOOD_EXISTS_SPATIAL.format(path_aggregated_post),
-        fetch = True)
-    prepostflood_exists_spatial_df = db_conn.run_query(
-        PREPOSTFLOOD_EXISTS_SPATIAL.format(path_aggregated_prepost),
-        fetch = True)
+    # Perform the merge
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[INFO] Starting spatial merge ... {now} ...")
+    try:
+        flood_map_merge = postprocess.spatial_aggregation(geojsons_lst)
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"[INFO] Finished merge at {now}.\n")
 
-    # Proceed to compute spatial aggregation
-    spatial_agg_dict = dict()
-    if overwrite or postflood_exists_spatial_df.empty:
+        # Save the result to GCP
+        print(f"[INFO] Saving the final FLOOD map to GCP:\n"
+              f"\t{path_flood_merge}")
+        utils.write_geojson_to_gcp(path_flood_merge, flood_map_merge)
 
-        # Assemble a list of files to be aggregated
-        postflood_aggregation_files = \
-            [p for p in post_flood_paths
-             if spatial_check_exist(p, 'postflood', db_conn)]
-        num_files = len(postflood_aggregation_files)
+        # Update the database
+        do_update_spatial(db_conn, bucket_uri, session_code,
+                          "flood", path_flood_merge,
+                          flood_start_date, flood_end_date)
+
+    except Exception:
+        print("\t[ERR] Spatial merger failed!\n")
+        traceback.print_exc(file=sys.stdout)
+
+    if create_inundate_map:
+
+        # Select the files for the reference map
+        inundate_df = temporal_df.loc[temporal_df["mode"] == "inundate"]
+        geojsons_lst = [x for x in inundate_df["data_path"].values]
+        num_files = len(geojsons_lst)
         if num_files == 0:
-            print("[WARN] Found no files to aggregate during flood period! ")
+            print(f"\t[ERR] No reference files to merge!")
+            return
         else:
-            print(f"\t[INFO] Aggregating {num_files} flood maps.\n"
-                  f"\tTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            # Perform the spatial aggregation
-            data_all = \
-                postprocess.spatial_aggregation(postflood_aggregation_files)
-            print(f"\t[INFO] Finished aggregation.\n"
-                  f"\tTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            print(f"\tSelected {num_files} grid patches for inundation map.")
+
+        # Path to final merged flood map
+        path_inundate_merge = \
+            os.path.join(session_path,
+                         (f"inundate_{ref_end_date_str}_"
+                          f"{flood_start_date_str}_"
+                          f"{flood_end_date_str}.geojson"))
+
+        # Perform the merge
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"[INFO] Starting spatial merge ... {now} ...")
+        try:
+            inundate_map_merge = postprocess.spatial_aggregation(geojsons_lst)
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[INFO] Finished merge at {now}.\n")
 
             # Save the result to GCP
-            print(f"\t[INFO] Saving the final map to GCP:\n"
-                  f"\t{path_aggregated_post}")
-            utils.write_geojson_to_gcp(path_aggregated_post, data_all)
+            print(f"[INFO] Saving the final INUNDATION map to GCP:\n"
+                  f"\t{path_flood_merge}")
+            utils.write_geojson_to_gcp(path_inundate_merge, inundate_map_merge)
 
-            spatial_agg_dict['postflood'] = path_aggregated_post
-
-    # Proceed to aggregate pre-flood data
-    if overwrite or prepostflood_exists_spatial_df.empty:
-
-        # Assemble a list of files to be aggregated
-        prepostflood_aggregation_files = \
-            [p for p in prepost_flood_paths
-             if spatial_check_exist(p, 'prepostflood', db_conn)]
-        num_files = len(prepostflood_aggregation_files)
-        if num_files == 0:
-            print("[WARN] Found no during pre-flood period! ")
-        else:
-            print(f"\t[INFO] Aggregating {num_files} pre-flood maps.\n"
-                  f"\tTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            # Perform the spatial aggregation
-            data_all =\
-                postprocess.spatial_aggregation(prepostflood_aggregation_files)
-            print(f"\t[INFO] Finished aggregation.\n"
-                  f"\tTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            print(f"\t[INFO] Saving the final map to GCP:\n"
-                  f"\t{path_aggregated_prepost}")
-            utils.write_geojson_to_gcp(path_aggregated_prepost, data_all)
-
-            spatial_agg_dict['prepostflood'] = path_aggregated_prepost
-
-    # Update the 'postproc_spatial' table with a successful result
-    db_aois = psycopg2.extensions.adapt(aois_list)
-    print("\t[INFO] Updating database with results.")
-    spatial_insert_query = SPATIAL_POSTPROC_INSERT.format(
-        db_aois,
-        'WF2_unet_rbgiswirs',
-        session_code,
-        preflood_start_date_str,
-        preflood_end_date_str,
-        flood_start_date_str,
-        flood_end_date_str,
-        spatial_agg_dict.get('postflood', None),
-        spatial_agg_dict.get('prepostflood', None))
-    db_conn.run_query(spatial_insert_query)
+            # Update the database
+            do_update_spatial(db_conn, bucket_uri, session_code,
+                              "inundate", path_inundate_merge,
+                              flood_start_date, flood_end_date,
+                              ref_start_date, ref_end_date)
+        except Exception:
+            print("\t[ERR] Spatial merger failed!\n")
+            traceback.print_exc(file=sys.stdout)
 
 
 if __name__ == "__main__":
@@ -611,15 +486,15 @@ if __name__ == "__main__":
 
     1) Aggregates all the flood maps between two given dates for each
        chosen grid patch (temporal aggregation).
-    2) Aggregates all the pre-flood maps between two given dates, for
-       each grid patch.
+    2) Aggregates all the reference maps between two given dates, for
+       each grid patch (optional)
     3) Computes the difference between the flood and pre-flood maps to
-       calculate the innundated areas.
+       calculate the innundated areas (optional).
     4) Joins the products in each grid patch into single files
        (spatial aggregation using the 'dissolve' operation).
 
-    The script operates on polygons - the geometry column of
-    GeoDataframes - and, for large areas, can take hours to complete.
+    The script operates on polygons (the geometry column of
+    GeoDataframes) can take hours to complete for large areas.
     """
 
     epilog_str = """
@@ -639,13 +514,10 @@ if __name__ == "__main__":
         help="Start date of the flooding event (YYYY-mm-dd, UTC).")
     ap.add_argument('--flood-end-date', required=True,
         help="End date of the flooding event (YYYY-mm-dd UTC).")
-    ap.add_argument('--preflood-start-date', required=True,
+    ap.add_argument('--ref-start-date', required=False,
         help="Start date of the unflooded time range (YYYY-mm-dd, UTC).")
-    ap.add_argument('--preflood-end-date', required=True,
+    ap.add_argument('--ref-end-date', required=False,
         help="End date of the unflooded time range (YYYY-mm-dd, UTC).")
-    # TODO: make preflood dates mutually inclusive
-    # https://stackoverflow.com/questions/19414060/
-    #         argparse-required-argument-y-if-x-is-present
     ap.add_argument('--session-code', required=True,
         help="Mapping session code (e.g, EMSR586).")
     ap.add_argument("--bucket-uri",
@@ -653,14 +525,16 @@ if __name__ == "__main__":
         help="Root URI of the GCP bucket \n[%(default)s].")
     ap.add_argument("--path-env-file", default="../.env",
         help="Path to the hidden credentials file [%(default)s].")
-    ap.add_argument("--collection_name",
+    ap.add_argument("--collection-name",
         choices=["all", "Landsat", "S2"], default="all",
         help="Collections to use in the postprocessing. [%(default)s].")
     ap.add_argument("--model-name",
         choices=["WF2_unet_rbgiswirs", "all"], default="all",
         help="Model outputs to include in the postprocessing. [%(default)s].")
     ap.add_argument('--overwrite', default=False, action='store_true',
-        help="Overwrite existing output products.")
+        help=(f"Overwrite existing temporal merge products.\n"
+              f"Default is to re-create all temporal products before "
+              f"performing spatial merge."))
     args = ap.parse_args()
 
     # Parse the flood date range
@@ -671,19 +545,26 @@ if __name__ == "__main__":
     flood_start_date, flood_end_date = sorted([_start, _end])
 
     # Parse the unflooded date range
-    _start = datetime.strptime(args.preflood_start_date, "%Y-%m-%d")\
-                              .replace(tzinfo=timezone.utc)
-    _end = datetime.strptime(args.preflood_end_date, "%Y-%m-%d")\
-                               .replace(tzinfo=timezone.utc)
-    preflood_start_date, preflood_end_date = sorted([_start, _end])
-
+    if ((args.ref_start_date is not None
+         and args.ref_end_date is None) or
+        (args.ref_start_date is None
+         and args.ref_end_date is not None)):
+        ap.error("Both reference start and end date must be provided.")
+    ref_start_date = None
+    ref_end_date = None
+    if args.ref_start_date and args.ref_end_date:
+        _start = datetime.strptime(args.ref_start_date, "%Y-%m-%d")\
+                         .replace(tzinfo=timezone.utc)
+        _end = datetime.strptime(args.ref_end_date, "%Y-%m-%d")\
+                       .replace(tzinfo=timezone.utc)
+        ref_start_date, ref_end_date = sorted([_start, _end])
 
     main(path_aois=args.path_aois,
          lga_names=args.lga_names,
          flood_start_date=flood_start_date,
          flood_end_date=flood_end_date,
-         preflood_start_date=preflood_start_date,
-         preflood_end_date=preflood_end_date,
+         ref_start_date=ref_start_date,
+         ref_end_date=ref_end_date,
          session_code=args.session_code,
          bucket_uri=args.bucket_uri,
          path_env_file=args.path_env_file,

@@ -57,7 +57,7 @@ python 01_download_images.py \
     --path-env-file ../.env
 
 # OR Query data by specifying a list of LGA names
-python 01_download_images_new.py \
+python 01_download_images.py \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
@@ -167,7 +167,7 @@ python 02_run_inference.py \
     --overwrite
 
 # OR start mapping using a list of LGAs
-python 02_run_inference_new.py \
+python 02_run_inference.py \
     --lga-names Newcastle,Maitland,Cessnock \
     --start-date 2022-06-10 \
     --end-date 2022-07-24 \
@@ -248,7 +248,7 @@ The following command is used to perform the merge:
 
 ```
 # Merge the predictions into a final flood map
-python 03_run_postprocessing_new.py \
+python 03_run_postprocessing.py \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
