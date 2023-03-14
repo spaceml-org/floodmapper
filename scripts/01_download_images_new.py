@@ -27,8 +27,7 @@ from db_utils import DB
 # DEBUG
 warnings.filterwarnings("ignore")
 
-
-def wait_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
+def monitor_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
     """
     Track active GEE download tasks and update database.
 
@@ -46,22 +45,25 @@ def wait_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
 
     """
 
-    # Build a list of active download tasks
+    num_tasks = len(tasks)
+    print(f"[INFO] Total number of tasks is {num_tasks}.")
+
+    # Track active tasks in this list. Assume all active initially.
     active_tasks = []
     for task in tasks:
-        if task.active():
-            active_tasks.append((task.status()["description"], task))
+        active_tasks.append((task.status()["description"], task))
 
     # Run while the active task list contains entries
     task_error_count = 0
     while len(active_tasks) > 0:
-        print("[INFO] %d tasks running" % len(active_tasks))
+        print("[INFO] %d active tasks running" % len(active_tasks))
+        print("[INFO] Polling status of actve tasks ...")
 
         # Loop through the tasks
         active_tasks_new = []
         for _i, (t, task) in enumerate(list(active_tasks)):
 
-            # Add active tasks to the new task list
+            # Add active tasks to the new task list and continue
             if task.active():
                 active_tasks_new.append((t, task))
                 continue
@@ -69,16 +71,19 @@ def wait_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
             # Check if inactive tasks have completed, or finished with
             # an error and set their status in the DB.
             desc = task.status()["description"]
+            # Need to strip date from the image_id for permanent water layer
+            if "PERMANENTWATERJRC" in desc:
+                desc = desc[:-5]
             query = (f"UPDATE image_downloads "
                      f"SET status = %s "
                      f"WHERE image_id = %s;")
             if task.status()["state"] != "COMPLETED":
-                print("[WARN] error in task {}:\n {}".format(t, task.status()))
+                print("\t[ERR] Error in task {}:\n {}".format(t, task.status()))
                 task_error_count += 1
                 data = (0, desc)
                 db_conn.run_query(query, data)
             elif task.status()["state"] == "COMPLETED":
-                print("[INFO] task {} completed.".format(t))
+                print("\t[INFO] task {} completed.".format(t))
                 data = (1, desc)
                 db_conn.run_query(query, data)
 
@@ -265,7 +270,6 @@ def main(path_aois: str,
     num_flood_images = len(images_available_gee_flood)
     print(f"[INFO] Found {num_flood_images} flooding images on GEE archive.")
 
-
     # Query data available during reference time-period
     if do_download_ref:
         print("[INFO] Querying Google Earth Engine for pre-flooding images.")
@@ -280,7 +284,7 @@ def main(path_aois: str,
         num_ref_images = len(images_available_gee_ref)
         print(f"[INFO] Found {num_ref_images} pre-flood images on GEE archive.")
 
-    # Merge pre and post download list
+    # Merge reference and flood download list
     if do_download_ref:
         images_available_gee = pd.concat([images_available_gee_flood,
                                           images_available_gee_ref],
@@ -373,10 +377,13 @@ def main(path_aois: str,
                 continue
 
             # Query the status of the image in database
+            # Status:
+            #        0 = not downloaded (e.g., because of failed threshold)
+            #        1 = downloaded successfully
+            #       -1 = download in progress or failed
             do_download = False
             tq.write("\tQuerying database for existing image.")
-            query = (f"SELECT image_id, status, valids, "
-                     f"cloud_probability, valids "
+            query = (f"SELECT image_id, status "
                      f"FROM image_downloads "
                      f"WHERE image_id = %s;")
             data = (desc,)
@@ -385,13 +392,13 @@ def main(path_aois: str,
             # If an entry exists
             if len(img_row) > 0:
                 tq.write("\tImage found in database.")
-                tq.write("\tChecking download status ...", end="")
+                tq.write("\tChecking download status ... ", end="")
                 img_row = img_row.iloc[0]
 
                 # Skip if already confirmed downloaded (status = 1)
                 if img_row.status == 1:
                     tq.write("downloaded.")
-                    tq.write("\tSkipping downloaded image.")
+                    tq.write("\tSkipping existing image.")
                     continue
                 else:
                     tq.write("NOT downloaded.")
@@ -515,6 +522,10 @@ def main(path_aois: str,
                     maxPixels=5_000_000_000)
                 task.start()
                 tasks.append(task)
+            else:
+                tq.write(f"\n\tWILL NOT DOWNLOAD THE IMAGE.\n")
+            num_tasks = len(tasks)
+            tq.write(f"\t[INFO] Currently {num_tasks} in the task list.")
 
             # Database Update block ------------------------------------------#
 
@@ -539,7 +550,6 @@ def main(path_aois: str,
     # JRC/GSW1_3/YearlyHistory product.
     print("\n\n" + "="*80)
     print("\n\n[INFO] Downloading permanent water layer for each grid patch.")
-    #for aoi_geom in tq(aois_data.itertuples(), total=num_patches):
     for aoi_geom in aois_data.itertuples():
 
         # Print a title
@@ -547,8 +557,7 @@ def main(path_aois: str,
         print(f"Processing Patch: '{aoi_geom.name}'\n")
 
         try:
-            image_id = (f"{aoi_geom.name}_PERMANENTWATERJRC_"
-                        f"{flood_start_date.year}")
+            image_id = (f"{aoi_geom.name}_PERMANENTWATERJRC")
             print("\tQuerying database for existing image.")
             query = (f"SELECT image_id, status, valids, "
                      f"cloud_probability, valids "
@@ -556,39 +565,36 @@ def main(path_aois: str,
                      f"WHERE image_id = %s;")
             data = (image_id,)
             img_row = db_conn.run_query(query, data, fetch=True)
-            #print(query)
-            #print(data)
-            #print("ROW\n", img_row)
-            #input()
             status = 0
             if len(img_row) > 0:
                 print("\tImage found in database.")
-                print("\tChecking download status ...", end="")
+                print("\tChecking download status in DB ... ")
                 img_row = img_row.iloc[0]
                 status = img_row.status
-                print("STATUS", status)
             if status == 1:
-                tq.write("\tWater layer already downloaded")
+                tq.write("\tImage already downloaded.")
                 continue
+            else:
+                tq.write("\tImage NOT already downloaded.")
             lon, lat = list(aoi_geom.geometry.centroid.coords)[0]
             crs = ee_download.convert_wgs_to_utm(lon=lon, lat=lat)
             folder_dest_permament = os.path.join(bucket_grid_path,
                                                  aoi_geom.name,
                                                  "PERMANENTWATERJRC")
-            file_dest_permanent = os.path.join(folder_dest_permament,
-                                               f"{flood_start_date.year}.tif")
 
-            # Start download tasks on GEE. Returns a list of active tasks.
-            print("\n\tSUBMITTING DOWNLOAD TASK TO GOOGLE EARTH ENGINE\n")
+            # Command the latest permanent water layer be downloaded.
+            # Method returns a GEE task if successful, or None otherwise.
+            print("\tCommanding download of permanent water layer.")
             task_permanent = ee_download.download_permanent_water(
                 aoi_geom.geometry,
                 date_search=flood_start_date,
                 path_bucket=folder_dest_permament,
-                name_task=f"PERMANENTWATERJRC_{aoi_geom.name}",
+                name_task=f"{aoi_geom.name}_PERMANENTWATERJRC",
                 crs=crs)
 
             # Append download tasks to the task list and update in the database
             if task_permanent is not None:
+                print("\n\tSUBMITTED DOWNLOAD TASK TO GOOGLE EARTH ENGINE\n")
                 tasks.append(task_permanent)
                 do_update_download(db_conn,
                                    image_id,
@@ -599,10 +605,8 @@ def main(path_aois: str,
                                    None,
                                    None,
                                    None,
-                                   0,
+                                   -1,
                                    folder_dest_permament)
-            else:
-                print("ERROR SUBMITTING TASK")
 
         except Exception as e:
             warnings.warn(f"Failed PERMANENT WATER JRC {aoi_geom}")
@@ -611,8 +615,8 @@ def main(path_aois: str,
     # Create a JSON file with a master task list
     tasks_fname = datetime.now().strftime('%Y-%m-%d_%H.%M.%S') + ".json"
     print(f"\n[INFO] Preparing task list file '{tasks_fname}'. \n"
-          f"       Please wait while GEE is queried for task status."
-          f"       (This can take a little while  ...")
+          f"       Please wait while GEE is queried for task status.\n"
+          f"       This can take a little while  ...\n")
     tasks_dump = [t.status() for t in tasks]
     with open(tasks_fname, "w") as f:
         json.dump(tasks_dump, f, indent=2)
@@ -626,7 +630,7 @@ def main(path_aois: str,
           f"which can display a progress bars and time estimates.\n\n")
 
     # Now run the task monitor loop until tasks are done
-    wait_tasks(tasks, db_conn)
+    monitor_tasks(tasks, db_conn)
     db_conn.close_connection()
 
 if __name__ == '__main__':
