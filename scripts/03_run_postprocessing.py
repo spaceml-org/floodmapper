@@ -174,15 +174,15 @@ def main(path_aois,
             aois_data = utils.read_geojson_from_gcp(path_aois)
         else:
             aois_data = gpd.read_file(path_aois)
-        if not "name" in aois_data.columns:
-            sys.exit(f"[ERR] File '{path_aois}' must have column 'name'.")
+        if not "patch_name" in aois_data.columns:
+            sys.exit(f"[ERR] File '{path_aois}' must have column 'patch_name'.")
         print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
 
     # Or define AOIs using known names of local government areas (LGAs).
     if lga_names:
         print("[INFO] Searching for LGA names in the database.")
         lga_names_lst = lga_names.split(",")
-        query = (f"SELECT name, ST_AsText(geometry), lga_name22 "
+        query = (f"SELECT patch_name, ST_AsText(geometry), lga_name22 "
                  f"FROM grid_loc "
                  f"WHERE lga_name22 IN %s;")
         data = (tuple(lga_names_lst),)
@@ -194,7 +194,7 @@ def main(path_aois,
 
     # Check for duplicates
     aois_data_orig_shape = aois_data.shape[0]
-    aois_data = aois_data.drop_duplicates(subset=['name'],
+    aois_data = aois_data.drop_duplicates(subset=['patch_name'],
                                           keep='first',
                                           ignore_index=True)
     print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
@@ -205,7 +205,7 @@ def main(path_aois,
     print(f"[INFO] Found {num_patches} grid patches to process.")
     if num_patches == 0:
         sys.exit(f"[ERR] No valid grid patches selected - exiting.")
-    aois_list = aois_data.name.to_list()
+    aois_list = aois_data.patch_name.to_list()
 
     # Initialise / reset the patches in the postproc_temporal table
     for _iaoi, aoi in enumerate(aois_list):

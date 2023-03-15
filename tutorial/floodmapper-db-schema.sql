@@ -38,8 +38,7 @@ SET default_table_access_method = heap;
 CREATE TABLE public.grid_loc (
     patch_name character varying,
     lga_name22 character varying,
-    geometry public.geometry(Polygon,4326),
-    PRIMARY KEY (patch_name)
+    geometry public.geometry(Polygon,4326)
 );
 
 ALTER TABLE public.grid_loc OWNER TO postgres;

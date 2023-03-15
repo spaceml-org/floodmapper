@@ -211,15 +211,15 @@ def main(path_aois: str,
             aois_data = utils.read_geojson_from_gcp(path_aois)
         else:
             aois_data = gpd.read_file(path_aois)
-        if not "name" in aois_data.columns:
-            sys.exit(f"[ERR] File '{path_aois}' must have column 'name'.")
+        if not "patch_name" in aois_data.columns:
+            sys.exit(f"[ERR] File '{path_aois}' must have column 'patch_name'.")
         print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
 
     # Or define AOIs using known names of local government areas (LGAs).
     if lga_names:
         print("[INFO] Searching for LGA names in the database.")
         lga_names_lst = lga_names.split(",")
-        query = (f"SELECT name, ST_AsText(geometry), lga_name22 "
+        query = (f"SELECT patch_name, ST_AsText(geometry), lga_name22 "
                  f"FROM grid_loc "
                  f"WHERE lga_name22 IN %s;")
         data = (tuple(lga_names_lst),)
@@ -231,7 +231,7 @@ def main(path_aois: str,
 
     # Check for duplicates
     aois_data_orig_shape = aois_data.shape[0]
-    aois_data = aois_data.drop_duplicates(subset=['name'],
+    aois_data = aois_data.drop_duplicates(subset=['patch_name'],
                                           keep='first',
                                           ignore_index=True)
     print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
@@ -246,7 +246,7 @@ def main(path_aois: str,
     # Filter by grid patch name, if provided
     if (grid_name_filter is not None) and (grid_name_filter != ""):
         print(f"[INFO] Selecting only grid patch '{grid_name_filter}'.")
-        aois_data = aois_data[aois_data["name"] == grid_name_filter]
+        aois_data = aois_data[aois_data["patch_name"] == grid_name_filter]
         if not aois_data.shape[0] > 0:
             sys.exit(f"[ERR] {grid_name_filter} not found in selection.")
 
@@ -298,17 +298,17 @@ def main(path_aois: str,
     print(f"[INFO] Expanding query to all overlapping images.")
     aois_images = ee_query.images_by_query_grid(
         images_available_gee,
-        aois_data).sort_values(["name", "localdatetime"])
+        aois_data).sort_values(["patch_name", "localdatetime"])
     num_images = len(aois_images)
     print(f"[INFO] Total images available in GEE: {num_images}")
 
-    aois_indexed = aois_data.set_index("name")
+    aois_indexed = aois_data.set_index("patch_name")
 
     # TODO filter aois_images for only_one_pre option
     # (keep image with lowest cloud cover and highest overlap)
     #if only_one_previous:
     #    aois_images = \
-    #        aois_images.groupby(["name", "prepost"])\
+    #        aois_images.groupby(["patch_name", "prepost"])\
     #                   .apply(lambda x:
     #                          x.iloc[np.argmax(x["overlap"])] \
     #                          if x['prepost'] == 'pre')
@@ -334,7 +334,7 @@ def main(path_aois: str,
     #   'satellite'            ... 'S2A', 'S2B', 'LC08', 'LC09'
     #   'prepost'              ... 'pre'- or 'post'- flood image
     #   'index_right'          ...
-    #   'name'                 ... name of grid patch
+    #   'patch_name'           ... name of grid patch
     #   'lga_name22'           ... name of LGA covered by image
     #-------------------------------------------------------------------------#
 
@@ -342,7 +342,7 @@ def main(path_aois: str,
     tasks = []
 
     # Loop through the list of AVAILABLE images
-    aois_grp = aois_images.groupby(["name", "solarday",
+    aois_grp = aois_images.groupby(["patch_name", "solarday",
                                     "satellite", "mode"])
     num_groups = len(aois_grp)
     print(f"[INFO] There are {num_groups} image groups (by day, satellite).")
@@ -554,10 +554,10 @@ def main(path_aois: str,
 
         # Print a title
         print("\n" + "-"*80 + "\n")
-        print(f"Processing Patch: '{aoi_geom.name}'\n")
+        print(f"Processing Patch: '{aoi_geom.patch_name}'\n")
 
         try:
-            image_id = (f"{aoi_geom.name}_PERMANENTWATERJRC")
+            image_id = (f"{aoi_geom.patch_name}_PERMANENTWATERJRC")
             print("\tQuerying database for existing image.")
             query = (f"SELECT image_id, status, valids, "
                      f"cloud_probability, valids "
@@ -579,7 +579,7 @@ def main(path_aois: str,
             lon, lat = list(aoi_geom.geometry.centroid.coords)[0]
             crs = ee_download.convert_wgs_to_utm(lon=lon, lat=lat)
             folder_dest_permament = os.path.join(bucket_grid_path,
-                                                 aoi_geom.name,
+                                                 aoi_geom.patch_name,
                                                  "PERMANENTWATERJRC")
 
             # Command the latest permanent water layer be downloaded.
@@ -589,7 +589,7 @@ def main(path_aois: str,
                 aoi_geom.geometry,
                 date_search=flood_start_date,
                 path_bucket=folder_dest_permament,
-                name_task=f"{aoi_geom.name}_PERMANENTWATERJRC",
+                name_task=f"{aoi_geom.patch_name}_PERMANENTWATERJRC",
                 crs=crs)
 
             # Append download tasks to the task list and update in the database
@@ -598,7 +598,7 @@ def main(path_aois: str,
                 tasks.append(task_permanent)
                 do_update_download(db_conn,
                                    image_id,
-                                   name,
+                                   patch_name,
                                    'PERMANENTWATERJRC',
                                    f"{flood_start_date.year}-01-01",
                                    None,
