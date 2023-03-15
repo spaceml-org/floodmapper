@@ -3,7 +3,7 @@
 This tutorial provides a complete guide to using FloodMapper, including
 detailed instructions for installing the system on Google Cloud.
 
-Work through the chapters in order to creat a flood-extent map for a
+Work through the following chapters to create a flood-extent map for a
 recent flooding event in Australia.
 
  1. [Introduction to FloodMapper](01_INTRODUCTION.md).
