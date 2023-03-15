@@ -1,7 +1,7 @@
 # ML4Floods FloodMapper
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/spaceml-org/floodmapper/blob/cormac_devel/tutorial/documents/Floodmapper_NEMA_Logo_Black.png" alt="FloodMapper Logo" width="50%">
+    <img src="https://raw.githubusercontent.com/spaceml-org/floodmapper/cormac_devel/tutorial/documents/Floodmapper_NEMA_Logo_Black.png" alt="FloodMapper Logo" width="50%">
 </p>
 
 Welcome to the home of ML4Floods FloodMapper - a scalable pipeline for
