@@ -16,4 +16,4 @@ information will help in choosing date-ranges to command mapping.
 
 ---
 
-## NEXT: [Downloading Data and Creating Flood Maps](05_DOWNLOADING_AND_MAPPING.md)
+## NEXT: [Downloading Data and Creating Maps](05_DOWNLOADING_AND_MAPPING.md)

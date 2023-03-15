@@ -10,3 +10,6 @@ In the next section we will explore other ways to visualise and
 analyse the data produced by FloodMapper.
 
 
+---
+
+## NEXT: [Analysing the flood-extent map](07_ANALYSING.md)

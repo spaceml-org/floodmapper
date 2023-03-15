@@ -1,26 +1,40 @@
 # Introduction to ML4Floods and FloodMapper
 
-
 ## History and Philosophy of ML4Floods
+
+<p align="center">
+    <img src="https://raw.githubusercontent.com/spaceml-org/floodmapper/cormac_devel/tutorial/documents/Trillium_Flooding_Research.png" alt="Trillium Research" width="70%">
+</p>
+
+Trillium has been conducting research into flooding since 2019, as part
+of the [FDL USA](https://frontierdevelopmentlab.org/) and [FDL
+Europe](https://fdleurope.org/) programs. The ML4Floods Toolbox
+started life as a pipeline to support the generation of a
+flood-segmentation model that could be run onboard a
+satellite. However, the UK Space Agency (UKSA) saw the potential for
+that pipeline to become useful as a stand-alone tool. In 2020, with
+support from the UKSA, Trillum re-engineered the pipeline into a
+fully-fledged open toolbox, with the aim of democratizing
+ML-assisted flood-mapping research..
 
 A brief history of ML4Floods and an illustrated outline of the system
 is available in the following slide deck:
 
-**Slides:** [[GOOGLE SLIDES]](https://docs.google.com/presentation/d/1_E0wAscHeM68X99P9Ivn2uYYC9n8dLTqmUD7HwMwMGM/edit?usp=sharing)
+**Slides:** [[GOOGLE SLIDES]](https://docs.google.com/presentation/d/1DTnF2yeGAXHCRvNSfz_oJjfv0zb_dqhuOxWXXIK3Iss/edit?usp=sharing)
 
 
 ## Subsystems and Services
 
-NEMA FloodMapper is adapted from Trillium's ML4Floods machine learning
+FloodMapper is adapted from Trillium's ML4Floods machine learning
 toolkit. This works as a hybrid system, employing cloud-based storage
 to manage large amounts of data, but performing processing operations
 on a local computer (which itself may be a virtual machine - VM -
 operating in the cloud). Source-code, models and technical information
 on ML4Floods can be accessed at:
 
- * GitHub: [https://github.com/spaceml-org/ml4floods](https://github.com/spaceml-org/ml4flood)
- * Documentation: [JupyterBook](https://github.com/spaceml-org/ml4floods/tree/main/jupyterbook/content)
- * System Diagram: [PNG](https://raw.githubusercontent.com/spaceml-org/ml4floods/main/jupyterbook/content/intro/ml4cc_diagram_export.png)
+ * **GitHub:** [https://github.com/spaceml-org/ml4floods](https://github.com/spaceml-org/ml4floods)
+ * **Documentation:** [Project Website](http://ml4floods.com/)
+ * **System Diagram:** [PNG](https://raw.githubusercontent.com/spaceml-org/ml4floods/main/jupyterbook/content/intro/ml4cc_diagram_export.png)
 
 The system makes use of the following external services:
 
@@ -33,11 +47,11 @@ The system makes use of the following external services:
  * [Copernicus EMS](https://emergency.copernicus.eu/) - for accessing
    information on recent flooding events.
 
-Here we describe the essential components of the NEMA FloodMapper
-system and provide an overview of how to create a flood-extent map.
+Here we describe the essential components of the FloodMapper system
+and provide an overview of how to create a flood-extent map.
 
 
-## The GCP Bucket - Data Storage
+### The GCP Bucket - Data Storage
 
 Almost all data products (including intermediate and final data) are
 stored on a GCP bucket, so it is important to understand the 
@@ -90,9 +104,9 @@ final output maps. Here, <MAPPING_SESSION_X> might be named for
 Copernicus EMS code, or other suitable event identifier.
 
 
-## The Database - Metadata Tracking
+### The Database - Metadata Tracking
 
-NEMA FloodMapper makes use of a PostgreSQL database [hosted in
+FloodMapper makes use of a PostgreSQL database [hosted in
 GCP](https://cloud.google.com/sql/docs/postgres) to store essential
 metadata. The database allows the system to easily keep track of tasks
 running on GCP, such as images being downloaded and the status of
@@ -105,13 +119,13 @@ calls.
 
 ## The Processing Machine - Command and Control
 
-NEMA FloodMapper is designed to be run from a single computer using a
+FloodMapper is designed to be run from a single computer using a
 mixture of Jupyter Notebooks (for data preparation and analysis) and
 executable Python scripts. Instructions for installing FloodMapper on
 a Linux Processing Machine are provided later in this tutorial.
 
 
-## Overview of Creating a Flood Extent Map
+### Overview of Creating a Flood Extent Map
 
 The steps to create a flood-extent map are as follows:
 

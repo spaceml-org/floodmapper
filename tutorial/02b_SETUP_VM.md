@@ -12,9 +12,9 @@ create a dedicated a virtual machine (VM) on GCP.
 ## Setting up a Deep Learning instance
 
 GCP provides specialised virtual machines that are pre-configured for
-Deep Learning workflows. They are setup with a GPU and already have
+Deep Learning workflows. They are set up with a GPU and already have
 most of the necessary software installed (e.g., NVIDIA CUDA, Python,
-PyTorch etc.). To setup a Deep Learning VM, do the following:
+PyTorch etc.). To set up a Deep Learning VM, do the following:
 
  1. Navigate to the 'Compute Engine > [VM
     Instances](https://console.cloud.google.com/compute/instances)'
@@ -41,7 +41,7 @@ PyTorch etc.). To setup a Deep Learning VM, do the following:
 After the VM has been deployed, click on the **tensorflow.jinja** text
 to bring up the 'Getting Started' information. There is a direct link
 under **SSH** to bring up a terminal in a browser. Clicking this will
-log you onto the machine under your current Google username, in a
+log you onto the machine **under your current Google username**, in a
 directory called ```/home/<username>```. Your account has *sudo*
 access to install software, which we can do with some simple
 commands. Just now we will install the command line client to connect
@@ -63,11 +63,11 @@ account we created earlier.
  file and click the **Upload Files** button.
 
 The file will appear in the current directory (confirm by running
-```ls```). If the upload processes throws an error, restart the SSH
-terminal and try again immediately.
+```ls``` in the terminal). If the upload processes throws an error,
+restart the SSH terminal and try again immediately.
 
 At this point we will download a copy of the FloodMapper repo so we
-can setup the Python environment. Execute the following in the
+can set up the Python environment. Execute the following in the
 SSH terminal:
 
  1. Download the FloodMapper repo from Github:
@@ -106,8 +106,8 @@ through [Jupyter Lab](https://jupyter.org/), which we will start now.
 ## Accessing your VM through Jupyter Lab in a browser
 
 Jupyter Lab gives you access to Jupyter notebooks, a Python terminal
-and standard command line shell. You launch a Jupyter Lab session
-connected to your VM through the GCP Console:
+and standard command line shell. Using the GCP Console, you can launch
+a Jupyter Lab session that is connected to your VM:
 
  1. Navigate to 'Vertex AI >
     [Workbench](https://console.cloud.google.com/vertex-ai/workbench)'
@@ -118,7 +118,7 @@ connected to your VM through the GCP Console:
 
 **NB:** JupyterLab does not give you access to the VM via your Google
 user account, but through a special ```/home/jupyter``` account set up
-for the Jupyter server. This means that you won’t see your own google
+for the Jupyter server. This means that you won’t see your own Google
 user account home directory, but a shared ```jupyter``` one for anyone
 that accesses the notebook. We will do all of our processing in this
 folder.
@@ -149,8 +149,8 @@ environment by registering the new processing kernel.
 ## Downloading FloodMapper for production use
 
 Since we will be running the FloodMapper system through the Jupyter
-account, we need to download a new copy of the codebase under
-```/home/jupyter```.
+account, we need to download a new copy of the FloodMapper codebase
+under ```/home/jupyter```.
 
 
  1. Download the FloodMapper repo from Github:
@@ -158,7 +158,7 @@ account, we need to download a new copy of the codebase under
      # Fetch the FloodMapper code
      git clone https://github.com/spaceml-org/floodmapper.git
      ```
- 1. Now is also a good time to copy the access key from your user directory:
+ 1. Now is also a good time to copy the GCP access key from your user directory:
      ```
      # Copy the key file to the Jupyter account
      cp ../<username>/<key_file.json> .
@@ -166,12 +166,12 @@ account, we need to download a new copy of the codebase under
 
 Close the JupyterLab session by clicking **File > Shut Down**. If you
 re-open JupyterLab, you should see the option to open Python notebooks
-under the (floodmapper) environment.
+under the `(floodmapper)` environment.
 
 
-The Processing Machine is almost ready to use, aside from enabling
+The processing machine is almost ready to use, aside from enabling
 database and bucket access. We will set these up in the next steps.
 
 ---
 
-## NEXT: [Configuring FloodMapper](02c_SETUP_CONFIGURATION.md)
+## NEXT: [Configuring the FloodMapper system](02c_SETUP_CONFIGURATION.md)

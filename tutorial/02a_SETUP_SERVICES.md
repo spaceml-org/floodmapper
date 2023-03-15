@@ -1,6 +1,6 @@
 # Setting up FloodMapper Services
 
-NEMA FloodMapper uses the following external services:
+FloodMapper uses the following external services:
 
  * [Google Earth Engine](https://earthengine.google.com/) (GEE) - for
    accessing recent satellite data and geographic information.
@@ -12,9 +12,9 @@ NEMA FloodMapper uses the following external services:
    information on recent flooding events.
 
 These are coupled with a Python-based control system and the ML4Floods
-toolkit to deliver flood-mapping and analysis capabilities. This
+Toolkit to deliver flood-mapping and analysis capabilities. This
 documents explains how to create the necessary accounts and
-cloud-based systems, and set up the Processing Machine.
+cloud-based systems, and how set up the processing machine.
 
 
 ## Google Earth Engine
@@ -26,7 +26,7 @@ and NASA Landsat-8/9 images. These are saved to the GCP bucket for
 later processing (unfortunately, custom ML models cannot be hosted on
 GEE, which is why we built ML4Floods and FloodMapper).
 
-FloodMapper requires a *Google-validated* account with Google Earth
+FloodMapper requires a *validated* account with Google Earth
 Engine, which can be obtained by navigating to
 [https://earthengine.google.com/signup/](https://earthengine.google.com/signup/).
 It usually takes a few days for the Google team to validate a new
@@ -40,8 +40,8 @@ Gmail account).
 ### Configuring GEE Access
 
 The FloodMapper processing machine needs to be configured to access
-Google Earth Engine. GCP virtual machines (VMs) are are authenticated
-by default if you are logged into GCP using a GEE-registered
+Google Earth Engine. Virtual machines (VMs) hosted on GCP are are authenticated
+by default if the user is are logged into GCP using a GEE-registered
 account. For other (external-to-GCP) machines, authenticating is as
 simple as running a terminal command, followed by logging into GEE via
 the browser. Credentials are saved to the local machine after the
@@ -59,7 +59,7 @@ will be saved to disk, which will automate subsequent GEE access.
 
 ## Google Cloud Compute
 
-NEMA FloodMapper and ML4Floods uses cloud-based storage to avoid
+FloodMapper and ML4Floods uses cloud-based storage to avoid
 retaining large amounts of data on local machines. Instead, a GCP
 storage bucket is configured as a remote disk and accessed over the
 network. GCP can also be used to host the FloodMapper processing
@@ -82,7 +82,7 @@ for FloodMapper.
  1. In the 'New Project' window that appears, enter a project name and
  select a billing account. A project name can contain only letters,
  numbers, single quotes, hyphens, spaces, or exclamation points, and
- must be between 4 and 30 characters (e.g., 'nema-floodmapper').
+ must be between 4 and 30 characters (e.g., 'floodmapper-demo').
 
  1. Select the parent organisation, in the **Organisation**
  box. That resource will be the hierarchical parent of the new
@@ -148,7 +148,7 @@ the following commands:
 ```
 # Execute in a terminal (assumes BASH shell)
 export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key/file/floodmapper-key.json"
-export GS_USER_PROJECT="nema-floodmapper"
+export GS_USER_PROJECT="floodmapper-demo"
 ```
 
 However, in the production system we store this information in a
@@ -198,7 +198,7 @@ server on GCP:
 
  1. Set a password for the default 'postgres' admin account.
 
- 1. Under 'Database Version' select the latest (PostGreSQL 14).
+ 1. Under 'Database Version' select the latest (currently PostGreSQL 14).
 
  1. For starting configuration, choose **Development** for low use or
  **Production** for critical applications.

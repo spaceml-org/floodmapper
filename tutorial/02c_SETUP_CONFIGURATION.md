@@ -6,7 +6,7 @@ in GCP.
 
 ## Configuring the FloodMapper database connections
 
-When first setup, security defaults mean that the FloodMapper database
+When first set up, security defaults mean that the FloodMapper database
 server will refuse all external connections. External machines must
 have their IP address added to a 'whitelist'. To add a machine (e.g.,
 the processing machine) do the following:
@@ -22,10 +22,10 @@ the processing machine) do the following:
 
  1. Click **Done** and **Save**.
 
-**NB:** If you want to allow *all* incoming connections, add
+**NB:** If you want to allow **all** incoming connections, add
  "0.0.0.0/0" as an authorized connection. However, this is not
  recommended as it opens the instance to connections from any IP
- address, and could leave it vulnerable to unauthorized access.  1.
+ address, which could leave it vulnerable to unauthorized access.
 
 ## Initializing the table structures
 
@@ -104,9 +104,9 @@ address' from the 'Overview' page.
       Schema |       Name        | Type  |  Owner
      --------+-------------------+-------+----------
       public | grid_loc          | table | postgres
-      public | images_download   | table | postgres
+      public | image_downloads   | table | postgres
       public | lgas_info         | table | postgres
-      public | model_inference   | table | postgres
+      public | inference         | table | postgres
       public | postproc_spatial  | table | postgres
       public | postproc_temporal | table | postgres
       public | spatial_ref_sys   | table | postgres
@@ -135,7 +135,7 @@ ML4FLOODS_DB_PW="<db_access_password>"
 
 # Google application credentials and project
 GOOGLE_APPLICATION_CREDENTIALS="/path/to/gcp/key/floodmapper-key.json"
-GS_USER_PROJECT="NEMA-FloodMapper"
+GS_USER_PROJECT="FloodMapper-Demo"
 
 # Base directory of FloodMapper installation
 ML4FLOODS_BASE_DIR="/path/to/floodmapper"
@@ -145,8 +145,8 @@ To configure on the VM do the following:
 
  1. Start a JuputerLab session from the [Vertex AI Workbench
  menu](https://console.cloud.google.com/vertex-ai/workbench?project=floodmapper-demo)
- and open a terminal (do **not** execute in the standard VM SSH
- terminal under ```/home/<username>```).
+ and open a terminal (**do not execute in the standard VM SSH
+ terminal under ```/home/<username>```**).
 
  1. Copy the template credential file to the floodmapper directory
     ```
