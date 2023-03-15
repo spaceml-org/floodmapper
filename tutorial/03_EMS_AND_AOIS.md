@@ -59,4 +59,4 @@ FloodMapper system.
 
 ---
 
-## NEXT: [Querying & Visualising Available Data](04_QUERYING_DATA.md)
+## NEXT: [Querying and Visualising Available Data](04_QUERYING_DATA.md)

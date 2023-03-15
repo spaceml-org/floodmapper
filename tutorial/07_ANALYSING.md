@@ -1,23 +1,11 @@
-# Visualising and Analysing the Flood Extent Map
+# Analysing the Flood Extent Map
 
-## Visualising the Map Using Q-GIS
+In the following notebook we show how to identify and count buildings affected
+by flooding.
 
-The popular open-source Q-GiS software can also be used to display the
-flood map on OpenStreetMap base layers.
+* [07_Analyse_Buildings_Affected](07_Analyse_Buildings_Affected.ipynb)
 
-TODO:
- * Instructions to convert to a GeoPackage
- * Instructions to chop up the big file into chunks.
- * Instructions to display the files in QGIS.
+This brings us to the end of our current tutorial - we hope you enjoyed it!
 
-## Displaying the Map on a Web Page
-
-TODO
- * Instructions on preparing the data.
- * Instructions on setting up the server.
- * Demonstration of web page.
-
-## Injesting Buildings and Demographic Information
-
-## Analysing the Statistics of LGAs
-
+If you have comments, questions or suggestions for improvement, please
+reach out to [Trillium Technologies](https://trillium.tech/).

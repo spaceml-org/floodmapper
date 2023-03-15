@@ -12,9 +12,9 @@ FloodMapper uses the following external services:
    information on recent flooding events.
 
 These are coupled with a Python-based control system and the ML4Floods
-toolkit to deliver flood-mapping and analysis capabilities. This
+Toolkit to deliver flood-mapping and analysis capabilities. This
 documents explains how to create the necessary accounts and
-cloud-based systems, and set up the Processing Machine.
+cloud-based systems, and how set up the processing machine.
 
 
 ## Google Earth Engine
@@ -26,7 +26,7 @@ and NASA Landsat-8/9 images. These are saved to the GCP bucket for
 later processing (unfortunately, custom ML models cannot be hosted on
 GEE, which is why we built ML4Floods and FloodMapper).
 
-FloodMapper requires a *Google-validated* account with Google Earth
+FloodMapper requires a *validated* account with Google Earth
 Engine, which can be obtained by navigating to
 [https://earthengine.google.com/signup/](https://earthengine.google.com/signup/).
 It usually takes a few days for the Google team to validate a new
@@ -40,8 +40,8 @@ Gmail account).
 ### Configuring GEE Access
 
 The FloodMapper processing machine needs to be configured to access
-Google Earth Engine. GCP virtual machines (VMs) are are authenticated
-by default if you are logged into GCP using a GEE-registered
+Google Earth Engine. Virtual machines (VMs) hosted on GCP are are authenticated
+by default if the user is are logged into GCP using a GEE-registered
 account. For other (external-to-GCP) machines, authenticating is as
 simple as running a terminal command, followed by logging into GEE via
 the browser. Credentials are saved to the local machine after the
@@ -198,7 +198,7 @@ server on GCP:
 
  1. Set a password for the default 'postgres' admin account.
 
- 1. Under 'Database Version' select the latest (PostGreSQL 14).
+ 1. Under 'Database Version' select the latest (currently PostGreSQL 14).
 
  1. For starting configuration, choose **Development** for low use or
  **Production** for critical applications.

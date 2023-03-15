@@ -6,16 +6,16 @@
     <img src="https://raw.githubusercontent.com/spaceml-org/floodmapper/cormac_devel/tutorial/documents/Trillium_Flooding_Research.png" alt="Trillium Research" width="70%">
 </p>
 
-Trillium has been conducting research into flooding since 2019 as part
+Trillium has been conducting research into flooding since 2019, as part
 of the [FDL USA](https://frontierdevelopmentlab.org/) and [FDL
 Europe](https://fdleurope.org/) programs. The ML4Floods Toolbox
-started life in 2019 as a pipeline to support the generation of a
+started life as a pipeline to support the generation of a
 flood-segmentation model that could be run onboard a
 satellite. However, the UK Space Agency (UKSA) saw the potential for
-that pipeline to become a useful stand-alone tool. In 2020, with
+that pipeline to become useful as a stand-alone tool. In 2020, with
 support from the UKSA, Trillum re-engineered the pipeline into a
-fully-fledged open toolbox - called ML4Floods - to democratize
-ML-assisted flood-mapping and model development.
+fully-fledged open toolbox, with the aim of democratizing
+ML-assisted flood-mapping research..
 
 A brief history of ML4Floods and an illustrated outline of the system
 is available in the following slide deck:
@@ -32,9 +32,9 @@ on a local computer (which itself may be a virtual machine - VM -
 operating in the cloud). Source-code, models and technical information
 on ML4Floods can be accessed at:
 
- * GitHub: [https://github.com/spaceml-org/ml4floods](https://github.com/spaceml-org/ml4floods)
- * Documentation: [Project Website](http://ml4floods.com/)
- * System Diagram: [PNG](https://raw.githubusercontent.com/spaceml-org/ml4floods/main/jupyterbook/content/intro/ml4cc_diagram_export.png)
+ * **GitHub:** [https://github.com/spaceml-org/ml4floods](https://github.com/spaceml-org/ml4floods)
+ * **Documentation:** [Project Website](http://ml4floods.com/)
+ * **System Diagram:** [PNG](https://raw.githubusercontent.com/spaceml-org/ml4floods/main/jupyterbook/content/intro/ml4cc_diagram_export.png)
 
 The system makes use of the following external services:
 
@@ -51,7 +51,7 @@ Here we describe the essential components of the FloodMapper system
 and provide an overview of how to create a flood-extent map.
 
 
-## The GCP Bucket - Data Storage
+### The GCP Bucket - Data Storage
 
 Almost all data products (including intermediate and final data) are
 stored on a GCP bucket, so it is important to understand the 
@@ -104,7 +104,7 @@ final output maps. Here, <MAPPING_SESSION_X> might be named for
 Copernicus EMS code, or other suitable event identifier.
 
 
-## The Database - Metadata Tracking
+### The Database - Metadata Tracking
 
 FloodMapper makes use of a PostgreSQL database [hosted in
 GCP](https://cloud.google.com/sql/docs/postgres) to store essential
@@ -125,7 +125,7 @@ executable Python scripts. Instructions for installing FloodMapper on
 a Linux Processing Machine are provided later in this tutorial.
 
 
-## Overview of Creating a Flood Extent Map
+### Overview of Creating a Flood Extent Map
 
 The steps to create a flood-extent map are as follows:
 
