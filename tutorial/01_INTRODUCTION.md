@@ -1,12 +1,26 @@
 # Introduction to ML4Floods and FloodMapper
 
-
 ## History and Philosophy of ML4Floods
+
+<p align="center">
+    <img src="https://raw.githubusercontent.com/spaceml-org/floodmapper/cormac_devel/tutorial/documents/Trillium_Flooding_Research.png" alt="Trillium Research" width="70%">
+</p>
+
+Trillium has been conducting research into flooding since 2019 as part
+of the [FDL USA](https://frontierdevelopmentlab.org/) and [FDL
+Europe](https://fdleurope.org/) programs. The ML4Floods Toolbox
+started life in 2019 as a pipeline to support the generation of a
+flood-segmentation model that could be run onboard a
+satellite. However, the UK Space Agency (UKSA) saw the potential for
+that pipeline to become a useful stand-alone tool. In 2020, with
+support from the UKSA, Trillum re-engineered the pipeline into a
+fully-fledged open toolbox - called ML4Floods - to democratize
+ML-assisted flood-mapping and model development.
 
 A brief history of ML4Floods and an illustrated outline of the system
 is available in the following slide deck:
 
-**Slides:** [[GOOGLE SLIDES]](https://docs.google.com/presentation/d/1_E0wAscHeM68X99P9Ivn2uYYC9n8dLTqmUD7HwMwMGM/edit?usp=sharing)
+**Slides:** [[GOOGLE SLIDES]](https://docs.google.com/presentation/d/1DTnF2yeGAXHCRvNSfz_oJjfv0zb_dqhuOxWXXIK3Iss/edit?usp=sharing)
 
 
 ## Subsystems and Services
@@ -18,8 +32,8 @@ on a local computer (which itself may be a virtual machine - VM -
 operating in the cloud). Source-code, models and technical information
 on ML4Floods can be accessed at:
 
- * GitHub: [https://github.com/spaceml-org/ml4floods](https://github.com/spaceml-org/ml4flood)
- * Documentation: [JupyterBook](https://github.com/spaceml-org/ml4floods/tree/main/jupyterbook/content)
+ * GitHub: [https://github.com/spaceml-org/ml4floods](https://github.com/spaceml-org/ml4floods)
+ * Documentation: [Project Website](http://ml4floods.com/)
  * System Diagram: [PNG](https://raw.githubusercontent.com/spaceml-org/ml4floods/main/jupyterbook/content/intro/ml4cc_diagram_export.png)
 
 The system makes use of the following external services:
