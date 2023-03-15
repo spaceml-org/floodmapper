@@ -1,6 +1,6 @@
 # Setting up FloodMapper Services
 
-NEMA FloodMapper uses the following external services:
+FloodMapper uses the following external services:
 
  * [Google Earth Engine](https://earthengine.google.com/) (GEE) - for
    accessing recent satellite data and geographic information.
@@ -59,7 +59,7 @@ will be saved to disk, which will automate subsequent GEE access.
 
 ## Google Cloud Compute
 
-NEMA FloodMapper and ML4Floods uses cloud-based storage to avoid
+FloodMapper and ML4Floods uses cloud-based storage to avoid
 retaining large amounts of data on local machines. Instead, a GCP
 storage bucket is configured as a remote disk and accessed over the
 network. GCP can also be used to host the FloodMapper processing
@@ -82,7 +82,7 @@ for FloodMapper.
  1. In the 'New Project' window that appears, enter a project name and
  select a billing account. A project name can contain only letters,
  numbers, single quotes, hyphens, spaces, or exclamation points, and
- must be between 4 and 30 characters (e.g., 'nema-floodmapper').
+ must be between 4 and 30 characters (e.g., 'floodmapper-demo').
 
  1. Select the parent organisation, in the **Organisation**
  box. That resource will be the hierarchical parent of the new
@@ -148,7 +148,7 @@ the following commands:
 ```
 # Execute in a terminal (assumes BASH shell)
 export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key/file/floodmapper-key.json"
-export GS_USER_PROJECT="nema-floodmapper"
+export GS_USER_PROJECT="floodmapper-demo"
 ```
 
 However, in the production system we store this information in a

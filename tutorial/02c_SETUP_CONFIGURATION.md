@@ -135,7 +135,7 @@ ML4FLOODS_DB_PW="<db_access_password>"
 
 # Google application credentials and project
 GOOGLE_APPLICATION_CREDENTIALS="/path/to/gcp/key/floodmapper-key.json"
-GS_USER_PROJECT="NEMA-FloodMapper"
+GS_USER_PROJECT="FloodMapper-Demo"
 
 # Base directory of FloodMapper installation
 ML4FLOODS_BASE_DIR="/path/to/floodmapper"

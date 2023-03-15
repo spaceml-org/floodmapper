@@ -11,7 +11,7 @@ is available in the following slide deck:
 
 ## Subsystems and Services
 
-NEMA FloodMapper is adapted from Trillium's ML4Floods machine learning
+FloodMapper is adapted from Trillium's ML4Floods machine learning
 toolkit. This works as a hybrid system, employing cloud-based storage
 to manage large amounts of data, but performing processing operations
 on a local computer (which itself may be a virtual machine - VM -
@@ -33,8 +33,8 @@ The system makes use of the following external services:
  * [Copernicus EMS](https://emergency.copernicus.eu/) - for accessing
    information on recent flooding events.
 
-Here we describe the essential components of the NEMA FloodMapper
-system and provide an overview of how to create a flood-extent map.
+Here we describe the essential components of the FloodMapper system
+and provide an overview of how to create a flood-extent map.
 
 
 ## The GCP Bucket - Data Storage
@@ -92,7 +92,7 @@ Copernicus EMS code, or other suitable event identifier.
 
 ## The Database - Metadata Tracking
 
-NEMA FloodMapper makes use of a PostgreSQL database [hosted in
+FloodMapper makes use of a PostgreSQL database [hosted in
 GCP](https://cloud.google.com/sql/docs/postgres) to store essential
 metadata. The database allows the system to easily keep track of tasks
 running on GCP, such as images being downloaded and the status of
@@ -105,7 +105,7 @@ calls.
 
 ## The Processing Machine - Command and Control
 
-NEMA FloodMapper is designed to be run from a single computer using a
+FloodMapper is designed to be run from a single computer using a
 mixture of Jupyter Notebooks (for data preparation and analysis) and
 executable Python scripts. Instructions for installing FloodMapper on
 a Linux Processing Machine are provided later in this tutorial.
