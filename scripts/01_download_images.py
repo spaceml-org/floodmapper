@@ -272,7 +272,7 @@ def main(path_aois: str,
 
     # Query data available during reference time-period
     if do_download_ref:
-        print("[INFO] Querying Google Earth Engine for pre-flooding images.")
+        print("[INFO] Querying Google Earth Engine for reference images.")
         images_available_gee_ref = ee_query.query(
             area_of_interest,
             period_ref_start,
@@ -282,7 +282,7 @@ def main(path_aois: str,
             add_s2cloudless=True)
         images_available_gee_ref["mode"] = "ref"
         num_ref_images = len(images_available_gee_ref)
-        print(f"[INFO] Found {num_ref_images} pre-flood images on GEE archive.")
+        print(f"[INFO] Found {num_ref_images} reference images on GEE archive.")
 
     # Merge reference and flood download list
     if do_download_ref:

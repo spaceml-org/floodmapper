@@ -488,7 +488,7 @@ if __name__ == "__main__":
        chosen grid patch (temporal aggregation).
     2) Aggregates all the reference maps between two given dates, for
        each grid patch (optional)
-    3) Computes the difference between the flood and pre-flood maps to
+    3) Computes the difference between the flood and reference maps to
        calculate the innundated areas (optional).
     4) Joins the products in each grid patch into single files
        (spatial aggregation using the 'dissolve' operation).
