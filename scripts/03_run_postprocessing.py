@@ -80,7 +80,7 @@ def do_update_temporal(db_conn, bucket_uri, session_code, aoi, model_name,
     """
     Query to update the temporal table with a successful result.
     """
-    query = (f"INSERT INTO postproc_temporal_new"
+    query = (f"INSERT INTO postproc_temporal"
              f"(bucket_uri, session, patch_name, model_name, "
              f"date_start, date_end, mode, status, data_path) "
              f"VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s) "
@@ -100,7 +100,7 @@ def do_update_spatial(db_conn, bucket_uri, session_code, mode, data_path,
     """
     Query to update the spatial table with a successful result.
     """
-    query = (f"INSERT INTO postproc_spatial_new"
+    query = (f"INSERT INTO postproc_spatial"
              f"(bucket_uri, session, flood_date_start, flood_date_end,"
              f" ref_date_start, ref_date_end, mode, data_path, status) "
              f"VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s) "
@@ -209,13 +209,13 @@ def main(path_aois,
 
     # Initialise / reset the patches in the postproc_temporal table
     for _iaoi, aoi in enumerate(aois_list):
-        query = (f"INSERT INTO postproc_temporal_new"
+        query = (f"INSERT INTO postproc_temporal"
                  f"(bucket_uri, session, patch_name, mode) "
                  f"VALUES(%s, %s, %s, %s) "
                  f"ON CONFLICT (session, patch_name, mode) DO NOTHING;")
         data = (bucket_uri, session_code, aoi, "flood")
         db_conn.run_query(query, data)
-    query = (f"UPDATE postproc_temporal_new "
+    query = (f"UPDATE postproc_temporal "
              f"SET status = %s "
              f"WHERE session = %s;")
     data = (0, session_code)
@@ -384,13 +384,13 @@ def main(path_aois,
 
     # Query the database for successful maps of each mode
     query = (f"SELECT patch_name, mode, data_path "
-             f"FROM postproc_temporal_new "
+             f"FROM postproc_temporal "
              f"WHERE session = %s AND status = %s;")
     data = (session_code, 1)
     temporal_df = db_conn.run_query(query, data, fetch=True)
 
     # Reset the status in the spatial table
-    query = (f"UPDATE postproc_spatial_new "
+    query = (f"UPDATE postproc_spatial "
              f"SET status = %s "
              f"WHERE session = %s;")
     data = (0, session_code)
