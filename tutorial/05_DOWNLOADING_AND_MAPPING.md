@@ -46,11 +46,10 @@ in a terminal under the ```floodmapper/scripts``` directory:
 # Change to the scripts directory
 cd scripts
 
-# Query data by pointing to a saved AoI file
+# Query data by pointing to a saved AoI file (can be local, or on GCP)
 python 01_download_images.py \
     --session-code EMSR586 \
     --path-aois gs://floodmapper-demo/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --session-code EMSR586 \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
     --ref-start-date 2022-06-10 \
@@ -73,9 +72,12 @@ python 01_download_images.py \
 The script will submit a list of tasks to GEE, which accomplishes most
 of the downloads in the background. After submitting all tasks, the
 script continues running, polling GEE every few seconds to check on the
-task status and update the database. The script writes a 'master list'
-of task 'keys' to a JSON file in the curent directory. This can be
-used with a later Jupyter notebook to monitor and plot total progress.
+task status and update the database.
+
+A session code **must** be provided: the parameters of the session
+(including AoI grid patches and date-ranges) are stored in the database
+indexed by this code. The status of the GEE tasks are also tracked in
+the database.
 
 **Note that help text for each of the three main tasks can be
   displayed by executing with a ```-h``` or ```--help``` command-line
@@ -160,37 +162,20 @@ The inference task can be started by executing one of the following
 commands from a terminal:
 
 ```
-# Start mapping using the gridded AoI file
+# Start mapping using the gridded AoI filefor the session
 python 02_run_inference.py \
-    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --start-date 2022-06-10 \
-    --end-date 2022-07-24 \
+    --session-code EMSR586 \
     --model-name WF2_unet_rbgiswirs \
-    --bucket-uri gs://floodmapper-demo \
-    --path-env-file ../.env \
-    --collection-name S2 \
-    --distinguish-flood-traces \
-    --overwrite
-
-# OR start mapping using a list of LGAs
-python 02_run_inference.py \
-    --lga-names Newcastle,Maitland,Cessnock \
-    --start-date 2022-06-10 \
-    --end-date 2022-07-24 \
-    --model-name WF2_unet_rbgiswirs \
-    --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env \
     --collection-name S2 \
     --distinguish-flood-traces \
     --overwrite
 ```
 
-Here we have chosen a date range that encompases both reference and
-flooding data (assuming we choose a reference data just before the
-flood). The argument ```--distinguish-flood-traces``` applies a union
-of ML-derived water masks and a MNDWI threshold for better
-sensitivity. The spatial selection command (```--path-aois``` or
-```--lga-names```) should be the same as in the download task.
+Here the script reads the session parameters (e.g., date ranges and
+AoIs) from the database. The argument ```--distinguish-flood-traces```
+applies a union of ML-derived water masks and a MNDWI threshold for
+better sensitivity.
 
 Note that the inference task must be applied to each
 satellite separately and should be run a second time with the
@@ -199,13 +184,10 @@ satellite separately and should be run a second time with the
 ```
 # Run separately for Landsat
 python 02_run_inference.py \
-    --lga-names Newcastle,Maitland,Cessnock \
-    --start-date 2022-06-10 \
-    --end-date 2022-07-24 \
+    --session-code EMSR586 \
     --model-name WF2_unet_rbgiswirs \
-    --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env \
-    --collection-name Landsat \
+    --collection-name S2 \
     --distinguish-flood-traces \
     --overwrite
 ```
@@ -256,14 +238,9 @@ The following command is used to perform the time-aggregation and merge:
 ```
 # Aggregate and merge the predictions into a final flood map
 python 03_run_postprocessing.py \
-    --lga-names Newcastle,Maitland,Cessnock \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
-    --ref-start-date 2022-06-10 \
-    --ref-end-date 2022-06-20 \
     --session-code EMSR586 \
-    --bucket-uri gs://floodmapper-demo \
-    --path-env-file ../.env
+    --path-env-file ../.env \
+    --overwrite
 ```
 
 After the script has completed, the final maps will be available on
