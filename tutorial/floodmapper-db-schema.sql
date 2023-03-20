@@ -66,6 +66,34 @@ CREATE TABLE public.lgas_info (
 ALTER TABLE public.lgas_info OWNER TO postgres;
 
 --
+-- The session_info table stores essential details about a mappinng session
+--
+
+CREATE TABLE public.session_info (
+    session character varying(50) NOT NULL,
+    flood_date_start date NOT NULL,
+    flood_date_end date NOT NULL,
+    ref_date_start date,
+    ref_date_end date,
+    bucket_uri character varying(50),
+    PRIMARY KEY(session)
+);
+
+ALTER TABLE public.session_info OWNER TO postgres;
+
+--
+-- The session_patches table associates grid patches with a session name
+--
+
+CREATE TABLE public.session_patches (
+    session character varying(50) NOT NULL,
+    patch_name character varying NOT NULL,
+    PRIMARY KEY(session, patch_name)
+);
+
+ALTER TABLE public.session_patches OWNER TO postgres;
+
+--
 -- The image downloads table tracks the image download process
 --
 
@@ -85,6 +113,20 @@ CREATE TABLE public.image_downloads (
 );
 
 ALTER TABLE public.image_downloads OWNER TO postgres;
+
+--
+-- The gee_task_tracker table tracks tasks for sessions
+--
+
+CREATE TABLE public.gee_task_tracker (
+    description character varying NOT NULL,
+    state_code character varying,
+    session character varying(50),
+    datestamp timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(description)
+);
+
+ALTER TABLE public.gee_task_tracker OWNER TO postgres;
 
 --
 -- The inference table tracks the progress of the inference process

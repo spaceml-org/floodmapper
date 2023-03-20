@@ -48,7 +48,9 @@ cd scripts
 
 # Query data by pointing to a saved AoI file
 python 01_download_images.py \
+    --session-code EMSR586 \
     --path-aois gs://floodmapper-demo/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --session-code EMSR586 \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
     --ref-start-date 2022-06-10 \
@@ -58,6 +60,7 @@ python 01_download_images.py \
 
 # OR Query data by specifying a list of LGA names
 python 01_download_images.py \
+    --session-code EMSR586 \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
@@ -160,7 +163,7 @@ commands from a terminal:
 # Start mapping using the gridded AoI file
 python 02_run_inference.py \
     --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
-    --start-date 2022-06-15 \
+    --start-date 2022-06-10 \
     --end-date 2022-07-24 \
     --model-name WF2_unet_rbgiswirs \
     --bucket-uri gs://floodmapper-demo \
@@ -256,7 +259,7 @@ python 03_run_postprocessing.py \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
-    --ref-start-date 2022-06-15 \
+    --ref-start-date 2022-06-10 \
     --ref-end-date 2022-06-20 \
     --session-code EMSR586 \
     --bucket-uri gs://floodmapper-demo \
