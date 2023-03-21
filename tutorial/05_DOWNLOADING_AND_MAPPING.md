@@ -187,7 +187,7 @@ python 02_run_inference.py \
     --session-code EMSR586 \
     --model-name WF2_unet_rbgiswirs \
     --path-env-file ../.env \
-    --collection-name S2 \
+    --collection-name Landsat \
     --distinguish-flood-traces \
     --overwrite
 ```
