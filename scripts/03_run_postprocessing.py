@@ -52,11 +52,13 @@ def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
         # Perform the time aggregation on the list of GeoJSONs
         num_files = len(geojsons_lst)
         tq.write(f"\tPerforming temporal aggregation of {num_files} files.")
-        aggregate_floodmap = postprocess.get_floodmap_post(geojsons_lst)
+        aggregate_floodmap = \
+            postprocess.get_floodmap_post(geojsons_lst).to_crs('epsg:4326')
 
         # Add the permanent water polygons
         if permanent_water_map is not None:
             tq.write(f"\tAdding permanent water layer.")
+            permanent_water_map = permanent_water_map.to_crs('epsg:4326')
             aggregate_floodmap = \
                 postprocess.add_permanent_water_to_floodmap(
                     permanent_water_map,
