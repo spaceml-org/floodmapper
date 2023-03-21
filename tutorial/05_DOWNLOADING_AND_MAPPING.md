@@ -49,7 +49,7 @@ cd scripts
 # Query data by pointing to a saved AoI file (can be local, or on GCP)
 python 01_download_images.py \
     --session-code EMSR586 \
-    --path-aois gs://floodmapper-demo/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --path-aois ../flood-activations/EMSR586/patches_to_map.geojson \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
     --ref-start-date 2022-06-10 \
