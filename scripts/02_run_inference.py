@@ -429,7 +429,6 @@ def main(session_code: str,
             channels = get_channel_configuration_bands(
                 config.data_params.channel_configuration,
                 collection_name=collection_name, as_string=True)
-            print(filename)
             torch_inputs, transform = \
                 dataset.load_input(filename, window=None, channels=channels)
             with rasterio.open(filename) as src:
