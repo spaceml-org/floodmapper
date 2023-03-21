@@ -39,8 +39,8 @@ The steps perormed by the download script ```01_download_images.py``` are:
  * Track image download progress in the database.
  * Download the latest permanent water layers from the GEE archive.
 
-To start the download process, execute one of the following commands
-in a terminal under the ```floodmapper/scripts``` directory:
+To start the download process, execute the following command in a
+terminal under the ```floodmapper/scripts``` directory:
 
 ```
 # Change to the scripts directory
@@ -209,9 +209,9 @@ how many times the satellites passed over).
       │  ├─ PERMANENTWATERJRC_vec     ... Permanent water polygon
       │  ├─ S2                        ... Downloaded S2 imagery
       │  ├─ Landsat                   ... Downloaded Landsat imagery
-      │  ├─ WF2_unet_rbgiswirs
       │  │
-      │  └─ WF2_unet_rbgiswirs_vec    ... Model predictions
+      │  │
+      │  └─ WF2_unet_rbgiswirs_vec    ... Vectorised model predictions
       │     ├─ Landsat
       │     │
       │     └─ S2
@@ -230,10 +230,11 @@ how many times the satellites passed over).
 
 During the post-processing step, the system runs through each grid
 position and constructs a 'best' flooding map from the time-series of
-data. These are then merged into a single file using a spatial disolve
-operartion.
+data in each grid patch. These are then merged into a single file
+using a spatial disolve operartion.
 
-The following command is used to perform the time-aggregation and merge:
+The following command is used to perform the time-aggregation and
+spatial merge:
 
 ```
 # Aggregate and merge the predictions into a final flood map
