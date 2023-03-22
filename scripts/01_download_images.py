@@ -593,6 +593,8 @@ def main(session_code: str,
                 download = False
             else:
                 tq.write("OK")
+            if info_ee["cloud_probability"] is None:
+                info_ee["cloud_probability"] = 100
             tq.write("\t\tCLOUD PIXELS: {:.2f} < [{:.2f}] ?  "\
                   .format(info_ee["cloud_probability"]/100, thresh_cloud),
                   end="")
