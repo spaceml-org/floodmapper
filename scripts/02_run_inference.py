@@ -448,7 +448,7 @@ def main(session_code: str,
                        "RESAMPLING": "NEAREST",
                        "nodata": 0}
             if not filename_save.startswith("gs"):
-                fs.makedirs(os.path.dirname(filename_save), exist_ok=True)
+                os.makedirs(os.path.dirname(filename_save), exist_ok=True)
             save_cog.save_cog(prediction[np.newaxis],
                               filename_save, profile=profile.copy(),
                               descriptions=["invalid/land/water/cloud/trace"],
@@ -472,7 +472,7 @@ def main(session_code: str,
             # Save probalistic prediction to bucket
             profile["nodata"] = -1
             if not filename_save_cont.startswith("gs"):
-                fs.makedirs(os.path.dirname(filename_save_cont), exist_ok=True)
+                os.makedirs(os.path.dirname(filename_save_cont), exist_ok=True)
             if pred_cont.shape[0] == 2:
                 descriptions = ["clear/cloud", "land/water"]
             else:
@@ -501,7 +501,7 @@ def main(session_code: str,
             tq.write("OK")
             if data_out is not None:
                 if not filename_save_vect.startswith("gs"):
-                    fs.makedirs(os.path.dirname(filename_save_vect),
+                    os.makedirs(os.path.dirname(filename_save_vect),
                                 exist_ok=True)
                 utils.write_geojson_to_gcp(filename_save_vect, data_out)
                 tq.write(f"\tSaved vectors to:\n\t{filename_save_vect}")
@@ -572,7 +572,7 @@ if __name__ == "__main__":
                     choices=["cpu", "cuda", "mps"],
                     help="Device name [%(default)s].")
     ap.add_argument("--collection-name",
-        choices=["Landsat", "S2"], default="S2",
+        choices=["Landsat", "S2", "both"], default="both",
         help="Collection name to predict on [%(default)s].")
     args = ap.parse_args()
 
@@ -585,13 +585,20 @@ if __name__ == "__main__":
                 f"Device '{args.device_name}' is not available. "
                 f"Run with --device-name cpu")
 
-    main(session_code=args.session_code,
-         experiment_name=args.model_name,
-         path_env_file=args.path_env_file,
-         device_name=args.device_name,
-         max_tile_size=args.max_tile_size,
-         th_water=args.th_water,
-         overwrite=args.overwrite,
-         th_brightness=args.th_brightness,
-         collection_name=args.collection_name,
-         distinguish_flood_traces=args.distinguish_flood_traces)
+    if args.collection_name == "both":
+        collections = ["Landsat", "S2"]
+    else:
+        collections = [args.collection_name]
+
+    for collection_name in collections:
+        print(f"[INFO] Running inference for {collection_name}.")
+        main(session_code=args.session_code,
+             experiment_name=args.model_name,
+             path_env_file=args.path_env_file,
+             device_name=args.device_name,
+             max_tile_size=args.max_tile_size,
+             th_water=args.th_water,
+             overwrite=args.overwrite,
+             th_brightness=args.th_brightness,
+             collection_name=collection_name,
+             distinguish_flood_traces=args.distinguish_flood_traces)
