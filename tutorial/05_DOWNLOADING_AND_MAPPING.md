@@ -158,8 +158,8 @@ The map creation process is split into two tasks:
  * **Aggregation & Merging:** aggregate the flood-extent masks in time and
      merge in space.
 
-The inference task can be started by executing one of the following
-commands from a terminal:
+The inference task can be started by executing the following
+command from a terminal:
 
 ```
 # Start mapping using the gridded AoI filefor the session
@@ -167,7 +167,6 @@ python 02_run_inference.py \
     --session-code EMSR586 \
     --model-name WF2_unet_rbgiswirs \
     --path-env-file ../.env \
-    --collection-name S2 \
     --distinguish-flood-traces \
     --overwrite
 ```
