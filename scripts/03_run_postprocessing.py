@@ -14,6 +14,9 @@ from ml4floods.data import utils
 from ml4floods.models import postprocess
 from dotenv import load_dotenv
 
+# Set bucket will not be requester pays
+utils.REQUESTER_PAYS_DEFAULT = False
+
 # DEBUG
 warnings.filterwarnings("ignore")
 
