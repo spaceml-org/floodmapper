@@ -129,13 +129,15 @@ following entries:
 ```
 # Database access credentials
 ML4FLOODS_DB_HOST="127.0.0.1"
-ML4FLOODS_DB="database_name"
+ML4FLOODS_DB_NAME="database_name"
 ML4FLOODS_DB_USER="db_user"
-ML4FLOODS_DB_PW="<db_access_password>"
+ML4FLOODS_DB_PWD="<db_access_password>"
+
+BUCKET_URI=gs://floodmapper-demo
 
 # Google application credentials and project
 GOOGLE_APPLICATION_CREDENTIALS="/path/to/gcp/key/floodmapper-key.json"
-GS_USER_PROJECT="FloodMapper-Demo"
+GS_USER_PROJECT="floodMapper-demo"
 
 # Base directory of FloodMapper installation
 ML4FLOODS_BASE_DIR="/path/to/floodmapper"
