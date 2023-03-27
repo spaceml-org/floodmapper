@@ -24,17 +24,24 @@ from tqdm import tqdm as tq
 from dotenv import load_dotenv
 from db_utils import DB
 
+# Set bucket will not be requester pays
+utils.REQUESTER_PAYS_DEFAULT = False
+
 # DEBUG
 warnings.filterwarnings("ignore")
 
-def monitor_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
+
+def monitor_tasks(db_conn, session, tasks:List[ee.batch.Task],
+                  interval_s=10) -> None:
     """
     Track active GEE download tasks and update database.
 
     Loops through the list of active Google Earth Engine tasks at a
     cadence of a few seconds, checking if inactive tasks completed
-    successfully, or finished with an error. Updates the database with
-    a completed [1] status, or saves the error message.
+    successfully, or finished with an error. Updates the image_donwload
+    table with a completed [1] status, or saves the error message.
+    Marks tasks as completed in the gee_tasks_table and removes these
+    entries at finish.
 
     Args:
         tasks: List of active GEE Tasks objects.
@@ -70,15 +77,17 @@ def monitor_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
 
             # Check if inactive tasks have completed, or finished with
             # an error and set their status in the DB.
-            desc = task.status()["description"]
+            status = task.status()
+            desc = status["description"]
+            state = status["state"]
             # Need to strip date from the image_id for permanent water layer
             if "PERMANENTWATERJRC" in desc:
                 desc = desc[:-5]
             query = (f"UPDATE image_downloads "
                      f"SET status = %s "
                      f"WHERE image_id = %s;")
-            if task.status()["state"] != "COMPLETED":
-                print("\t[ERR] Error in task {}:\n {}".format(t, task.status()))
+            if state != "COMPLETED":
+                print("\t[ERR] Error in task {}:\n {}".format(t, status))
                 task_error_count += 1
                 data = (0, desc)
                 db_conn.run_query(query, data)
@@ -87,12 +96,22 @@ def monitor_tasks(tasks:List[ee.batch.Task], db_conn, interval_s=10) -> None:
                 data = (1, desc)
                 db_conn.run_query(query, data)
 
+            # Update the tracking table in the database
+            print("\t[INFO] Updating task tracker in DB.")
+            update_task_tracker(db_conn, session, desc, state)
+
         # Update the list of active tasks and pause for interval_s
         active_tasks = active_tasks_new
         time.sleep(interval_s)
 
+    # Clean up
     print(f"[INFO] All tasks completed!\n"
-          f"[INFO] Tasks failed: {task_error_count}.")
+          f"[INFO] Tasks failed: {task_error_count}")
+    query = (f"DELETE FROM gee_task_tracker "
+             f"WHERE session = %s "
+             f"AND state_code = %s")
+    data = (session, "COMPLETED")
+    db_conn.run_query(query, data)
 
 
 def fix_landsat_gee_id(row):
@@ -110,6 +129,56 @@ def fix_landsat_gee_id(row):
         row['gee_id'].startswith("2_")) and ("LC" in row['gee_id']):
         return row['gee_id'][2:]
     return row['gee_id']
+
+
+def do_update_session_info(db_conn, bucket_uri, session, flood_start_date,
+                      flood_end_date, ref_start_date=None, ref_end_date=None):
+    """
+    Update the session_info table with key session information.
+    """
+    query = (f"INSERT INTO session_info "
+             f"(session, flood_date_start, flood_date_end, "
+             f"ref_date_start, ref_date_end, bucket_uri) "
+             f"VALUES (%s, %s, %s, %s, %s, %s) "
+             f"ON CONFLICT (session) DO UPDATE "
+             f"SET flood_date_start = %s, flood_date_end = %s, "
+             f"ref_date_start = %s, ref_date_end = %s, bucket_uri = %s")
+    data = (session, flood_start_date, flood_end_date, ref_start_date,
+            ref_end_date, bucket_uri, flood_start_date, flood_end_date,
+            ref_start_date, ref_end_date, bucket_uri)
+    db_conn.run_query(query, data)
+
+
+def do_update_session_patches(db_conn, session, patch_names):
+    """
+    Update the session_patches table.
+    """
+    query = (f"DELETE FROM session_patches "
+             f"WHERE session = %s;")
+    data = (session,)
+    db_conn.run_query(query, data)
+    query = (f"INSERT INTO session_patches "
+             f"(session, patch_name) "
+             f"VALUES (%s, %s) "
+             f"ON CONFLICT (session, patch_name) DO UPDATE "
+             f"SET session = %s, patch_name = %s;")
+    for patch_name in patch_names:
+        data = (session, patch_name, session, patch_name)
+        db_conn.run_query(query, data)
+
+
+def update_task_tracker(db_conn, session, description, state_code="COMPLETED"):
+    """
+    Update the GEE task tracker table in the database.
+    """
+    query = (f"INSERT INTO gee_task_tracker "
+             f"(session, description, state_code) "
+             f"VALUES (%s, %s, %s) "
+             f"ON CONFLICT (description) DO UPDATE "
+             f"SET session = %s, description = %s, state_code = %s;")
+    data = (session, description, state_code,
+            session, description, state_code)
+    db_conn.run_query(query, data)
 
 
 def do_update_download(db_conn, desc, name=None, constellation=None,
@@ -134,7 +203,8 @@ def do_update_download(db_conn, desc, name=None, constellation=None,
     db_conn.run_query(query, data)
 
 
-def main(path_aois: str,
+def main(session_code: str,
+         path_aois: str,
          lga_names: str,
          flood_start_date: datetime,
          flood_end_date: datetime,
@@ -145,7 +215,7 @@ def main(path_aois: str,
          threshold_invalids_flood: float = 0.7,
          threshold_invalids_ref: float = 0.1,
          collection_placeholder: str = "all",
-         bucket_uri: str = "gs://floodmapper-demo",
+         bucket_uri: str = "",
          path_env_file: str = "../.env",
          only_one_previous: bool = False,
          channel_configuration:str = "bgriswirs",
@@ -157,7 +227,7 @@ def main(path_aois: str,
     if  ref_start_date is None or ref_end_date is None:
         do_download_ref = False
 
-    # Set the flood start and end times
+    # Check for sensible dates
     today_date =  datetime.today().astimezone(flood_start_date.tzinfo)
     if flood_end_date > today_date:
         print("[WARN] Flood end date set to future time. Setting today.")
@@ -181,24 +251,34 @@ def main(path_aois: str,
         period_ref_start = ref_start_date
         period_ref_end = ref_end_date
 
-    # Parse the bucket URI and name
-    rel_grid_path = "0_DEV/1_Staging/GRID"
-    bucket_grid_path = os.path.join(bucket_uri, rel_grid_path)
-    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
-    print(f"[INFO] Will download files to:\n\t{bucket_grid_path}")
-
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
     if success:
         print(f"[INFO] Loaded environment from '{path_env_file}' file.")
         print(f"\tKEY FILE: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
         print(f"\tPROJECT: {os.environ['GS_USER_PROJECT']}")
+        if bucket_uri == "":
+            bucket_uri = os.environ["BUCKET_URI"]
+            assert bucket_uri is not None and bucket_uri != "", f"Bucket name not defined {bucket_uri}"
+            print(f"Bucket uri loaded from .env file {bucket_uri}")
     else:
         sys.exit(f"[ERR] Failed to load the environment file:\n"
                  f"\t'{path_env_file}'")
 
+    # Parse the bucket URI and name
+    rel_grid_path = "0_DEV/1_Staging/GRID"
+    bucket_grid_path = os.path.join(bucket_uri, rel_grid_path)
+    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
+    print(f"[INFO] Will download files to:\n\t{bucket_grid_path}")
+
     # Connect to the FloodMapper DB
     db_conn = DB(dotenv_path=path_env_file)
+
+    # Save the sesion information to the DB
+    print(f"[INFO] Saving session parameters to database.")
+    do_update_session_info(db_conn, bucket_uri, session_code,
+                           flood_start_date, flood_end_date,
+                           ref_start_date, ref_end_date)
 
     # Read the gridded AoIs from a file (on GCP or locally).
     if path_aois:
@@ -207,10 +287,19 @@ def main(path_aois: str,
             sys.exit(f"[ERR] File not found:\n\t{path_aois}")
         else:
             print(f"[INFO] Found AoI file:\n\t{path_aois}")
-        if path_aois.endswith(".geojson"):
+        if "://" in path_aois:
+            print(f"[INFO] Reading from remote disk.")
+            if not path_aois.endswith(".geojson"):
+                sys.exit(f"[ERR] Remote file is not in GeoJSON format."
+                         f"      Only GeoJSON files are supported on GCP.")
             aois_data = utils.read_geojson_from_gcp(path_aois)
         else:
-            aois_data = gpd.read_file(path_aois)
+            print(f"[INFO] Reading from local disk.")
+            try:
+                aois_data = gpd.read_file(path_aois)
+            except Exception:
+                print(f"[ERR] Failed to read local file.")
+                traceback.print_exc(file=sys.stdout)
         if not "patch_name" in aois_data.columns:
             sys.exit(f"[ERR] File '{path_aois}' must have column 'patch_name'.")
         print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
@@ -239,9 +328,14 @@ def main(path_aois: str,
 
     # Check the number of patches affected
     num_patches = len(aois_data)
-    print(f"[INFO] Found {num_patches} grid patches to download.")
+    print(f"[INFO] Found {num_patches} grid patches to query.")
     if num_patches == 0:
         sys.exit(f"[ERR] No valid grid patches selected - exiting.")
+
+    # Update the database with the patches in the session
+    print(f"[INFO] Saving grid patches to database.")
+    patch_names = aois_data["patch_name"].unique().tolist()
+    do_update_session_patches(db_conn, session_code, patch_names)
 
     # Filter by grid patch name, if provided
     if (grid_name_filter is not None) and (grid_name_filter != ""):
@@ -301,6 +395,30 @@ def main(path_aois: str,
         aois_data).sort_values(["patch_name", "localdatetime"])
     num_images = len(aois_images)
     print(f"[INFO] Total images available in GEE: {num_images}")
+
+    # Add an image description column to act as a unique image key
+    aois_images["constellation"] = aois_images.apply(
+        lambda r: "S2" if r["satellite"].startswith("S2") else "Landsat",
+        axis = 1)
+    aois_images["desc"] = aois_images[
+        ["patch_name", "constellation", "solarday"]].agg("_".join, axis=1)
+
+    # Query the DB for already downloaded images and filter from tasks
+    query = (f"SELECT DISTINCT im.image_id "
+             f"FROM image_downloads im "
+             f"INNER JOIN session_patches sp "
+             f"ON im.patch_name = sp.patch_name "
+             f"WHERE im.status = 1")
+    downloaded_df = db_conn.run_query(query, fetch=True)
+    downloaded_lst = downloaded_df.image_id.tolist()
+    num_downloaded = len(downloaded_lst)
+    print(f"[INFO] Skipping {num_downloaded} previously downloaded images.")
+    aois_images = aois_images[~aois_images["desc"].isin(downloaded_lst)]
+    num_images = len(aois_images)
+    if num_images == 0:
+        sys.exit(f"[INFO] No images selected for download! - exiting.")
+    else:
+        print(f"[INFO] Will attempt to download {num_images} images.")
 
     aois_indexed = aois_data.set_index("patch_name")
 
@@ -373,7 +491,7 @@ def main(path_aois: str,
 
             # Advance to next image if download task is already running
             if ee_download.istaskrunning(desc):
-                tq.write(f"\tdownload task already running '{desc}'.")
+                tq.write(f"\tDownload task already running '{desc}'.")
                 continue
 
             # Query the status of the image in database
@@ -482,6 +600,8 @@ def main(path_aois: str,
                 download = False
             else:
                 tq.write("OK")
+            if info_ee["cloud_probability"] is None:
+                info_ee["cloud_probability"] = 100
             tq.write("\t\tCLOUD PIXELS: {:.2f} < [{:.2f}] ?  "\
                   .format(info_ee["cloud_probability"]/100, thresh_cloud),
                   end="")
@@ -496,6 +616,7 @@ def main(path_aois: str,
             solardatetime_save = images_day_sat.solardatetime.mean()
 
             # Download Execution Block ---------------------------------------#
+
             status = 0
             if download:
                 status = -1
@@ -522,6 +643,11 @@ def main(path_aois: str,
                     maxPixels=5_000_000_000)
                 task.start()
                 tasks.append(task)
+
+                # Update the task_tracker table in the database.
+                tq.write("\t[INFO] Updating DB with submitted task.")
+                update_task_tracker(db_conn, session_code, desc, "SUBMITTED")
+
             else:
                 tq.write(f"\n\tWILL NOT DOWNLOAD THE IMAGE.\n")
             num_tasks = len(tasks)
@@ -559,6 +685,7 @@ def main(path_aois: str,
         try:
             image_id = (f"{aoi_geom.patch_name}_PERMANENTWATERJRC")
             print("\tQuerying database for existing image.")
+            print("IMG ID", image_id)
             query = (f"SELECT image_id, status, valids, "
                      f"cloud_probability, valids "
                      f"FROM image_downloads "
@@ -612,25 +739,13 @@ def main(path_aois: str,
             warnings.warn(f"Failed PERMANENT WATER JRC {aoi_geom}")
             traceback.print_exc(file=sys.stdout)
 
-    # Create a JSON file with a master task list
-    tasks_fname = datetime.now().strftime('%Y-%m-%d_%H.%M.%S') + ".json"
-    print(f"\n[INFO] Preparing task list file '{tasks_fname}'. \n"
-          f"       Please wait while GEE is queried for task status.\n"
-          f"       This can take a little while  ...\n")
-    tasks_dump = [t.status() for t in tasks]
-    with open(tasks_fname, "w") as f:
-        json.dump(tasks_dump, f, indent=2)
     print(f"\n\n" + "="*80 + "\n\n"
           f"All tasks have now been submitted to Google Earth Engine.\n"
           f"This script will remain running, monitoring task progress.\n"
-          f"Display will update every few seconds.\n\n"
-          f"The master task-list has been saved to the following file:\n\n"
-          f"\t{tasks_fname}\n\n"
-          f"This file can be read by the task monitoring notebook,\n"
-          f"which can display a progress bars and time estimates.\n\n")
+          f"Display will update every few seconds.\n\n")
 
     # Now run the task monitor loop until tasks are done
-    monitor_tasks(tasks, db_conn)
+    monitor_tasks(db_conn, session_code, tasks)
     db_conn.close_connection()
 
 if __name__ == '__main__':
@@ -656,6 +771,8 @@ if __name__ == '__main__':
     req.add_argument('--lga-names', default = "",
         help=(f"Comma separated string of LGA names.\n"
               f"Alternative to specifying a GeoJSON containing AoIs."))
+    ap.add_argument('--session-code', required=True,
+        help="Mapping session code (e.g, EMSR586).")
     ap.add_argument('--flood-start-date', required=True,
         help="Start date of the flooding event (YYYY-mm-dd, UTC).")
     ap.add_argument('--flood-end-date', required=True,
@@ -679,7 +796,7 @@ if __name__ == '__main__':
         choices=["Landsat", "S2", "all"], default="all",
         help="GEE collection to download data from [%(default)s].")
     ap.add_argument("--bucket-uri",
-        default="gs://floodmapper-demo",
+        default="",
         help="Root URI of the GCP bucket \n[%(default)s].")
     ap.add_argument("--path-env-file", default="../.env",
         help="Path to the hidden credentials file [%(default)s].")
@@ -713,7 +830,8 @@ if __name__ == '__main__':
                        .replace(tzinfo=timezone.utc)
         ref_start_date, ref_end_date = sorted([_start, _end])
 
-    main(path_aois=args.path_aois,
+    main(session_code=args.session_code,
+         path_aois=args.path_aois,
          lga_names=args.lga_names,
          flood_start_date=flood_start_date,
          flood_end_date=flood_end_date,

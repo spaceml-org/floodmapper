@@ -2,6 +2,8 @@ import argparse
 from ml4floods.data import utils
 import os
 
+# Set bucket will not be requester pays
+utils.REQUESTER_PAYS_DEFAULT = False
 
 if __name__ == "__main__":
     desc_str = """
