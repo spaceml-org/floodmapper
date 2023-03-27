@@ -1,4 +1,5 @@
 import psycopg2
+import psycopg2.extras as extras
 import os
 import glob
 import warnings
@@ -41,6 +42,7 @@ class DB:
             user=os.environ["ML4FLOODS_DB_USER"],
             password=os.environ["ML4FLOODS_DB_PWD"])
         self.conn.autocommit = True
+        self.cur = self.conn.cursor()
         print("[INFO] Connection successfully established.")
 
     def run_query(self, query, data=None, fetch=False):
@@ -58,6 +60,20 @@ class DB:
             else:
                 cur.close()
                 return
+        except Exception as e:
+            print("[ERR] SQL query failed: \n")
+            print(e)
+            return False
+
+    def run_batch_insert(self, query, data=None, page_size=100):
+        """
+        Insert multiple rows into the database in a single query.
+        """
+        cur = self.conn.cursor()
+        try:
+            extras.execute_batch(cur, query, data)
+            cur.close()
+            return
         except Exception as e:
             print("[ERR] SQL query failed: \n")
             print(e)
