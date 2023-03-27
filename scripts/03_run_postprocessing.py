@@ -14,9 +14,6 @@ from ml4floods.data import utils
 from ml4floods.models import postprocess
 from dotenv import load_dotenv
 
-# Set bucket will not be requester pays
-utils.REQUESTER_PAYS_DEFAULT = False
-
 # DEBUG
 warnings.filterwarnings("ignore")
 
@@ -55,13 +52,11 @@ def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
         # Perform the time aggregation on the list of GeoJSONs
         num_files = len(geojsons_lst)
         tq.write(f"\tPerforming temporal aggregation of {num_files} files.")
-        aggregate_floodmap = \
-            postprocess.get_floodmap_post(geojsons_lst)#.to_crs('epsg:4326')
+        aggregate_floodmap = postprocess.get_floodmap_post(geojsons_lst)
 
         # Add the permanent water polygons
         if permanent_water_map is not None:
             tq.write(f"\tAdding permanent water layer.")
-            permanent_water_map = permanent_water_map.to_crs(aggregate_floodmap.crs)
             aggregate_floodmap = \
                 postprocess.add_permanent_water_to_floodmap(
                     permanent_water_map,
@@ -101,7 +96,7 @@ def do_update_temporal(db_conn, bucket_uri, session_code, aoi, model_name,
 
 def do_update_spatial(db_conn, bucket_uri, session_code, mode, data_path,
                       flood_start_date=None, flood_end_date=None,
-                      ref_start_date=None, ref_end_date=None):
+                      ref_date_start=None, ref_date_end=None):
     """
     Query to update the spatial table with a successful result.
     """
@@ -114,17 +109,29 @@ def do_update_spatial(db_conn, bucket_uri, session_code, mode, data_path,
              f"flood_date_end = %s, ref_date_start = %s, ref_date_end = %s, "
              f"mode = %s, data_path = %s, status = %s")
     data = (bucket_uri, session_code, flood_start_date, flood_end_date,
-            ref_start_date, ref_end_date, mode, data_path, 1,
+            ref_date_start, ref_date_end, mode, data_path, 1,
             bucket_uri, flood_start_date, flood_end_date,
             ref_start_date, ref_end_date, mode, data_path, 1)
     db_conn.run_query(query, data)
 
 
-def main(session_code: str,
+def main(path_aois,
+         lga_names: str,
+         flood_start_date: datetime,
+         flood_end_date: datetime,
+         session_code: str,
+         ref_start_date: datetime = None,
+         ref_end_date: datetime = None,
+         bucket_uri: str = "gs://floodmapper-demo",
          path_env_file: str = "../.env",
          collection_name: str = "all",
          model_name: str = "all",
          overwrite: bool=False):
+
+    # Only create the inundation map if given reference dates
+    create_inundate_map = True
+    if  ref_start_date is None or ref_end_date is None:
+        create_inundate_map = False
 
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
@@ -136,34 +143,6 @@ def main(session_code: str,
         sys.exit(f"[ERR] Failed to load the environment file:\n"
                  f"\t'{path_env_file}'")
 
-    # Connect to the FloodMapper DB
-    db_conn = DB(dotenv_path=path_env_file)
-
-    # Fetch the session parameters from the database
-    query = (f"SELECT flood_date_start, flood_date_end, "
-             f"ref_date_start, ref_date_end, bucket_uri "
-             f"FROM session_info "
-             f"WHERE session = %s")
-    data = (session_code,)
-    session_df = db_conn.run_query(query, data, fetch=True)
-    flood_start_date = session_df.iloc[0]["flood_date_start"]
-    flood_end_date = session_df.iloc[0]["flood_date_end"]
-    ref_start_date = session_df.iloc[0]["ref_date_start"]
-    ref_end_date = session_df.iloc[0]["ref_date_end"]
-    bucket_uri = session_df.iloc[0]["bucket_uri"]
-
-    # Only create the inundation map if given reference dates
-    create_inundate_map = False
-    if ref_start_date is not None and ref_end_date is not None:
-        create_inundate_map = True
-
-    # Parse flood dates to strings (used as filename roots on GCP)
-    flood_start_date_str = flood_start_date.strftime("%Y-%m-%d")
-    flood_end_date_str = flood_end_date.strftime("%Y-%m-%d")
-    if create_inundate_map:
-        ref_start_date_str = ref_start_date.strftime("%Y-%m-%d")
-        ref_end_date_str = ref_end_date.strftime("%Y-%m-%d")
-
     # Construct the GCP paths
     rel_grid_path = "0_DEV/1_Staging/GRID"
     rel_operation_path = "0_DEV/1_Staging/operational"
@@ -174,17 +153,59 @@ def main(session_code: str,
     print(f"[INFO] Will read inference products from:\n\t{grid_path}")
     print(f"[INFO] Will write mapping products to:\n\t{session_path}")
 
-    # Fetch the AoI grid patches from the database
-    query = (f"SELECT DISTINCT patch_name "
-             f"FROM session_patches "
-             f"WHERE session = %s")
-    data = (session_code,)
-    aois_df = db_conn.run_query(query, data, fetch=True)
-    num_patches = len(aois_df)
+    # Parse flood dates to strings (used as filename roots on GCP)
+    flood_start_date_str = flood_start_date.strftime("%Y-%m-%d")
+    flood_end_date_str = flood_end_date.strftime("%Y-%m-%d")
+    if create_inundate_map:
+        ref_start_date_str = ref_start_date.strftime("%Y-%m-%d")
+        ref_end_date_str = ref_end_date.strftime("%Y-%m-%d")
+
+    # Connect to the FloodMapper DB
+    db_conn = DB(dotenv_path=path_env_file)
+
+    # Read the gridded AoIs from a file (on GCP or locally).
+    if path_aois:
+        fs_pathaois = utils.get_filesystem(path_aois)
+        if not fs_pathaois.exists(path_aois):
+            sys.exit(f"[ERR] File not found:\n\t{path_aois}")
+        else:
+            print(f"[INFO] Found AoI file:\n\t{path_aois}")
+        if path_aois.endswith(".geojson"):
+            aois_data = utils.read_geojson_from_gcp(path_aois)
+        else:
+            aois_data = gpd.read_file(path_aois)
+        if not "patch_name" in aois_data.columns:
+            sys.exit(f"[ERR] File '{path_aois}' must have column 'patch_name'.")
+        print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
+
+    # Or define AOIs using known names of local government areas (LGAs).
+    if lga_names:
+        print("[INFO] Searching for LGA names in the database.")
+        lga_names_lst = lga_names.split(",")
+        query = (f"SELECT patch_name, ST_AsText(geometry), lga_name22 "
+                 f"FROM grid_loc "
+                 f"WHERE lga_name22 IN %s;")
+        data = (tuple(lga_names_lst),)
+        grid_table = db_conn.run_query(query, data, fetch=True)
+        grid_table['geometry'] = gpd.GeoSeries.from_wkt(grid_table['st_astext'])
+        grid_table.drop(['st_astext'], axis=1, inplace = True)
+        aois_data = gpd.GeoDataFrame(grid_table, geometry='geometry')
+        print(f"[INFO] Query returned {len(aois_data)} grid patches.")
+
+    # Check for duplicates
+    aois_data_orig_shape = aois_data.shape[0]
+    aois_data = aois_data.drop_duplicates(subset=['patch_name'],
+                                          keep='first',
+                                          ignore_index=True)
+    print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
+          f"grid duplicates (removed).")
+
+    # Check the number of patches affected
+    num_patches = len(aois_data)
     print(f"[INFO] Found {num_patches} grid patches to process.")
     if num_patches == 0:
         sys.exit(f"[ERR] No valid grid patches selected - exiting.")
-    aois_list = aois_df.patch_name.to_list()
+    aois_list = aois_data.patch_name.to_list()
 
     # Initialise / reset the patches in the postproc_temporal table
     for _iaoi, aoi in enumerate(aois_list):
@@ -482,8 +503,26 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=desc_str, epilog=epilog_str,
                                  formatter_class=argparse.RawTextHelpFormatter)
+    req = ap.add_mutually_exclusive_group(required=True)
+    req.add_argument("--path-aois", default="",
+        help=(f"Path to GeoJSON containing grided AoIs.\n"
+              f"Can be a GCP bucket URI or path to a local file."))
+    req.add_argument('--lga-names', default = "",
+        help=(f"Comma separated string of LGA names.\n"
+              f"Alternative to specifying a GeoJSON containing AoIs."))
+    ap.add_argument('--flood-start-date', required=True,
+        help="Start date of the flooding event (YYYY-mm-dd, UTC).")
+    ap.add_argument('--flood-end-date', required=True,
+        help="End date of the flooding event (YYYY-mm-dd UTC).")
+    ap.add_argument('--ref-start-date', required=False,
+        help="Start date of the unflooded time range (YYYY-mm-dd, UTC).")
+    ap.add_argument('--ref-end-date', required=False,
+        help="End date of the unflooded time range (YYYY-mm-dd, UTC).")
     ap.add_argument('--session-code', required=True,
         help="Mapping session code (e.g, EMSR586).")
+    ap.add_argument("--bucket-uri",
+        default="gs://floodmapper-demo",
+        help="Root URI of the GCP bucket \n[%(default)s].")
     ap.add_argument("--path-env-file", default="../.env",
         help="Path to the hidden credentials file [%(default)s].")
     ap.add_argument("--collection-name",
@@ -498,7 +537,36 @@ if __name__ == "__main__":
               f"performing spatial merge."))
     args = ap.parse_args()
 
-    main(session_code=args.session_code,
+    # Parse the flood date range
+    _start = datetime.strptime(args.flood_start_date, "%Y-%m-%d")\
+                     .replace(tzinfo=timezone.utc)
+    _end = datetime.strptime(args.flood_end_date, "%Y-%m-%d")\
+                   .replace(tzinfo=timezone.utc)
+    flood_start_date, flood_end_date = sorted([_start, _end])
+
+    # Parse the unflooded date range
+    if ((args.ref_start_date is not None
+         and args.ref_end_date is None) or
+        (args.ref_start_date is None
+         and args.ref_end_date is not None)):
+        ap.error("Both reference start and end date must be provided.")
+    ref_start_date = None
+    ref_end_date = None
+    if args.ref_start_date and args.ref_end_date:
+        _start = datetime.strptime(args.ref_start_date, "%Y-%m-%d")\
+                         .replace(tzinfo=timezone.utc)
+        _end = datetime.strptime(args.ref_end_date, "%Y-%m-%d")\
+                       .replace(tzinfo=timezone.utc)
+        ref_start_date, ref_end_date = sorted([_start, _end])
+
+    main(path_aois=args.path_aois,
+         lga_names=args.lga_names,
+         flood_start_date=flood_start_date,
+         flood_end_date=flood_end_date,
+         ref_start_date=ref_start_date,
+         ref_end_date=ref_end_date,
+         session_code=args.session_code,
+         bucket_uri=args.bucket_uri,
          path_env_file=args.path_env_file,
          collection_name=args.collection_name,
          model_name=args.model_name,

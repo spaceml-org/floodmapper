@@ -39,17 +39,16 @@ The steps perormed by the download script ```01_download_images.py``` are:
  * Track image download progress in the database.
  * Download the latest permanent water layers from the GEE archive.
 
-To start the download process, execute the following command in a
-terminal under the ```floodmapper/scripts``` directory:
+To start the download process, execute one of the following commands
+in a terminal under the ```floodmapper/scripts``` directory:
 
 ```
 # Change to the scripts directory
 cd scripts
 
-# Query data by pointing to a saved AoI file (can be local, or on GCP)
+# Query data by pointing to a saved AoI file
 python 01_download_images.py \
-    --session-code EMSR586 \
-    --path-aois ../flood-activations/EMSR586/patches_to_map.geojson \
+    --path-aois gs://floodmapper-demo/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
     --ref-start-date 2022-06-10 \
@@ -59,7 +58,6 @@ python 01_download_images.py \
 
 # OR Query data by specifying a list of LGA names
 python 01_download_images.py \
-    --session-code EMSR586 \
     --lga-names Newcastle,Maitland,Cessnock \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
@@ -72,12 +70,9 @@ python 01_download_images.py \
 The script will submit a list of tasks to GEE, which accomplishes most
 of the downloads in the background. After submitting all tasks, the
 script continues running, polling GEE every few seconds to check on the
-task status and update the database.
-
-A session code **must** be provided: the parameters of the session
-(including AoI grid patches and date-ranges) are stored in the database
-indexed by this code. The status of the GEE tasks are also tracked in
-the database.
+task status and update the database. The script writes a 'master list'
+of task 'keys' to a JSON file in the curent directory. This can be
+used with a later Jupyter notebook to monitor and plot total progress.
 
 **Note that help text for each of the three main tasks can be
   displayed by executing with a ```-h``` or ```--help``` command-line
@@ -158,24 +153,59 @@ The map creation process is split into two tasks:
  * **Aggregation & Merging:** aggregate the flood-extent masks in time and
      merge in space.
 
-The inference task can be started by executing the following
-command from a terminal:
+The inference task can be started by executing one of the following
+commands from a terminal:
 
 ```
-# Start mapping using the gridded AoI filefor the session
+# Start mapping using the gridded AoI file
 python 02_run_inference.py \
-    --session-code EMSR586 \
+    --path-aois gs://floodmapper-test/0_DEV/1_Staging/operational/EMSR586/patches_to_map.geojson \
+    --start-date 2022-06-15 \
+    --end-date 2022-07-24 \
     --model-name WF2_unet_rbgiswirs \
+    --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env \
+    --collection-name S2 \
+    --distinguish-flood-traces \
+    --overwrite
+
+# OR start mapping using a list of LGAs
+python 02_run_inference.py \
+    --lga-names Newcastle,Maitland,Cessnock \
+    --start-date 2022-06-10 \
+    --end-date 2022-07-24 \
+    --model-name WF2_unet_rbgiswirs \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env \
+    --collection-name S2 \
     --distinguish-flood-traces \
     --overwrite
 ```
 
-Here the script reads the session parameters (e.g., date ranges and
-AoIs) from the database. The argument ```--distinguish-flood-traces```
-applies a union of ML-derived water masks and a MNDWI threshold for
-better sensitivity.
+Here we have chosen a date range that encompases both reference and
+flooding data (assuming we choose a reference data just before the
+flood). The argument ```--distinguish-flood-traces``` applies a union
+of ML-derived water masks and a MNDWI threshold for better
+sensitivity. The spatial selection command (```--path-aois``` or
+```--lga-names```) should be the same as in the download task.
 
+Note that the inference task must be applied to each
+satellite separately and should be run a second time with the
+```--collection-name Landsat``` argument.
+
+```
+# Run separately for Landsat
+python 02_run_inference.py \
+    --lga-names Newcastle,Maitland,Cessnock \
+    --start-date 2022-06-10 \
+    --end-date 2022-07-24 \
+    --model-name WF2_unet_rbgiswirs \
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env \
+    --collection-name Landsat \
+    --distinguish-flood-traces \
+    --overwrite
+```
 
 At this point, each valid grid position in the GCP bucket contains
 raster maps of water and cloud probability, alongside vectorised
@@ -194,9 +224,9 @@ how many times the satellites passed over).
       │  ├─ PERMANENTWATERJRC_vec     ... Permanent water polygon
       │  ├─ S2                        ... Downloaded S2 imagery
       │  ├─ Landsat                   ... Downloaded Landsat imagery
+      │  ├─ WF2_unet_rbgiswirs
       │  │
-      │  │
-      │  └─ WF2_unet_rbgiswirs_vec    ... Vectorised model predictions
+      │  └─ WF2_unet_rbgiswirs_vec    ... Model predictions
       │     ├─ Landsat
       │     │
       │     └─ S2
@@ -215,18 +245,22 @@ how many times the satellites passed over).
 
 During the post-processing step, the system runs through each grid
 position and constructs a 'best' flooding map from the time-series of
-data in each grid patch. These are then merged into a single file
-using a spatial disolve operartion.
+data. These are then merged into a single file using a spatial disolve
+operartion.
 
-The following command is used to perform the time-aggregation and
-spatial merge:
+The following command is used to perform the time-aggregation and merge:
 
 ```
 # Aggregate and merge the predictions into a final flood map
 python 03_run_postprocessing.py \
+    --lga-names Newcastle,Maitland,Cessnock \
+    --flood-start-date 2022-07-01 \
+    --flood-end-date 2022-07-24 \
+    --ref-start-date 2022-06-15 \
+    --ref-end-date 2022-06-20 \
     --session-code EMSR586 \
-    --path-env-file ../.env \
-    --overwrite
+    --bucket-uri gs://floodmapper-demo \
+    --path-env-file ../.env
 ```
 
 After the script has completed, the final maps will be available on

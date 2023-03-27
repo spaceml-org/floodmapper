@@ -32,9 +32,6 @@ from skimage.morphology import binary_dilation, disk
 from dotenv import load_dotenv
 from db_utils import DB
 
-# Set bucket will not be requester pays
-utils.REQUESTER_PAYS_DEFAULT = False
-
 # DEBUG
 warnings.filterwarnings("ignore")
 
@@ -275,8 +272,12 @@ def vectorize_outputv1(prediction: np.ndarray,
 
 
 @torch.no_grad()
-def main(session_code: str,
+def main(path_aois: str,
+         lga_names: str,
+         start_date: datetime,
+         end_date: datetime,
          experiment_name: str,
+         bucket_uri: str = "gs://floodmapper-demo",
          path_env_file: str = "../.env",
          device_name: str = "cpu",
          max_tile_size: int = 1024,
@@ -303,6 +304,14 @@ def main(session_code: str,
         session_data['th_brightness'] = th_brightness
         return json.dumps(session_data)
 
+    # Parse the bucket URI and model name
+    rel_model_path = "0_DEV/2_Mart/2_MLModelMart"
+    model_path = os.path.join(bucket_uri,
+                              rel_model_path,
+                              experiment_name)
+    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
+    print(f"[INFO] Full model path:\n\t{model_path}")
+
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
     if success:
@@ -316,38 +325,49 @@ def main(session_code: str,
     # Connect to the FloodMapper DB
     db_conn = DB(dotenv_path=path_env_file)
 
-    # Fetch the session parameters from the database
-    query = (f"SELECT flood_date_start, flood_date_end, "
-             f"ref_date_start, ref_date_end, bucket_uri "
-             f"FROM session_info "
-             f"WHERE session = %s")
-    data = (session_code,)
-    session_df = db_conn.run_query(query, data, fetch=True)
-    flood_start_date = session_df.iloc[0]["flood_date_start"]
-    flood_end_date = session_df.iloc[0]["flood_date_end"]
-    ref_start_date = session_df.iloc[0]["ref_date_start"]
-    ref_end_date = session_df.iloc[0]["ref_date_end"]
-    bucket_uri = session_df.iloc[0]["bucket_uri"]
-    
-    # Parse the bucket URI and model name
-    rel_model_path = "0_DEV/2_Mart/2_MLModelMart"
-    model_path = os.path.join(bucket_uri,
-                              rel_model_path,
-                              experiment_name)
-    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
-    print(f"[INFO] Full model path:\n\t{model_path}")
+    # Read the gridded AoIs from a file (on GCP or locally).
+    if path_aois:
+        fs_pathaois = utils.get_filesystem(path_aois)
+        if not fs_pathaois.exists(path_aois):
+            sys.exit(f"[ERR] File not found:\n\t{path_aois}")
+        else:
+            print(f"[INFO] Found AoI file:\n\t{path_aois}")
+        if path_aois.endswith(".geojson"):
+            aois_data = utils.read_geojson_from_gcp(path_aois)
+        else:
+            aois_data = gpd.read_file(path_aois)
+        if not "patch_name" in aois_data.columns:
+            sys.exit(f"[ERR] File '{path_aois}' must have column 'patch_name'.")
+        print(f"[INFO] AoI file contains {len(path_aois)} grid patches.")
 
-    # Fetch the AoI grid patches from the database
-    query = (f"SELECT DISTINCT patch_name "
-             f"FROM session_patches "
-             f"WHERE session = %s")
-    data = (session_code,)
-    aois_df = db_conn.run_query(query, data, fetch=True)
-    num_patches = len(aois_df)
+    # Or define AOIs using known names of local government areas (LGAs).
+    if lga_names:
+        print("[INFO] Searching for LGA names in the database.")
+        lga_names_lst = lga_names.split(",")
+        query = (f"SELECT patch_name, ST_AsText(geometry), lga_name22 "
+                 f"FROM grid_loc "
+                 f"WHERE lga_name22 IN %s;")
+        data = (tuple(lga_names_lst),)
+        grid_table = db_conn.run_query(query, data, fetch=True)
+        grid_table['geometry'] = gpd.GeoSeries.from_wkt(grid_table['st_astext'])
+        grid_table.drop(['st_astext'], axis=1, inplace = True)
+        aois_data = gpd.GeoDataFrame(grid_table, geometry='geometry')
+        print(f"[INFO] Query returned {len(aois_data)} grid patches.")
+
+    # Check for duplicates
+    aois_data_orig_shape = aois_data.shape[0]
+    aois_data = aois_data.drop_duplicates(subset=['patch_name'],
+                                          keep='first',
+                                          ignore_index=True)
+    print(f"[INFO] Found {aois_data_orig_shape - aois_data.shape[0]} "
+          f"grid duplicates (removed).")
+
+    # Check the number of patches affected
+    num_patches = len(aois_data)
     print(f"[INFO] Found {num_patches} grid patches to map.")
     if num_patches == 0:
         sys.exit(f"[ERR] No valid grid patches selected - exiting.")
-    aois_list = aois_df.patch_name.to_list()
+    aois_list = aois_data.patch_name.to_list()
 
     # Load the inference function
     inference_function, config = \
@@ -364,16 +384,10 @@ def main(session_code: str,
     query = (f"SELECT * FROM image_downloads "
              f"WHERE satellite = %s "
              f"AND patch_name IN %s "
-             f"AND status = 1 "
-             f"AND ((date >= %s "
-             f"AND date <= %s) ")
-    data = [collection_name, tuple(aois_list), flood_start_date, flood_end_date]
-    if ref_start_date is not None and ref_end_date is not None:
-        query += (f"OR (date >= %s "
-                  f"AND date <= %s));")
-        data += [ref_start_date, ref_end_date]
-    else:
-        query += (f");")
+             f"AND date >= %s "
+             f"AND date <= %s "
+             f"AND status = 1 ;")
+    data = (collection_name, tuple(aois_list), start_date, end_date)
     img_df = db_conn.run_query(query, data, fetch = True)
     num_rows = len(img_df)
     print(f"[INFO] Entries for {num_rows} downloaded images in the DB.")
@@ -385,7 +399,7 @@ def main(session_code: str,
         sys.exit("[WARN] No images matching selection - exiting.")
 
     # Construct the session data JSON - later saved in the DB with each image
-    #session_data = construct_session_data()
+    session_data = construct_session_data()
 
     # Process each image in turn
     files_with_errors = []
@@ -451,7 +465,7 @@ def main(session_code: str,
                        "RESAMPLING": "NEAREST",
                        "nodata": 0}
             if not filename_save.startswith("gs"):
-                os.makedirs(os.path.dirname(filename_save), exist_ok=True)
+                fs.makedirs(os.path.dirname(filename_save), exist_ok=True)
             save_cog.save_cog(prediction[np.newaxis],
                               filename_save, profile=profile.copy(),
                               descriptions=["invalid/land/water/cloud/trace"],
@@ -475,7 +489,7 @@ def main(session_code: str,
             # Save probalistic prediction to bucket
             profile["nodata"] = -1
             if not filename_save_cont.startswith("gs"):
-                os.makedirs(os.path.dirname(filename_save_cont), exist_ok=True)
+                fs.makedirs(os.path.dirname(filename_save_cont), exist_ok=True)
             if pred_cont.shape[0] == 2:
                 descriptions = ["clear/cloud", "land/water"]
             else:
@@ -504,7 +518,7 @@ def main(session_code: str,
             tq.write("OK")
             if data_out is not None:
                 if not filename_save_vect.startswith("gs"):
-                    os.makedirs(os.path.dirname(filename_save_vect),
+                    fs.makedirs(os.path.dirname(filename_save_vect),
                                 exist_ok=True)
                 utils.write_geojson_to_gcp(filename_save_vect, data_out)
                 tq.write(f"\tSaved vectors to:\n\t{filename_save_vect}")
@@ -552,11 +566,23 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=desc_str, epilog=epilog_str,
                                  formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument('--session-code', required=True,
-        help="Mapping session code (e.g, EMSR586).")
+    req = ap.add_mutually_exclusive_group(required=True)
+    req.add_argument("--path-aois", default="",
+        help=(f"Path to GeoJSON containing grided AoIs.\n"
+              f"Can be a GCP bucket URI or path to a local file."))
+    req.add_argument('--lga-names', default = "",
+        help=(f"Comma separated string of LGA names.\n"
+              f"Alternative to specifying a GeoJSON containing AoIs."))
+    ap.add_argument("--start-date", required=True,
+        help="Date to start inference (YYYY-mm-dd, UTC)")
+    ap.add_argument("--end-date", required=True,
+        help="Date to finish inference (YYYY-mm-dd, UTC)")
     ap.add_argument("--model-name",
         default="WF2_unet_rbgiswirs",
         help="Name of the folder containing model.pt and config.json files.")
+    ap.add_argument("--bucket-uri",
+        default="gs://floodmapper-demo",
+        help="Root URI of the GCP bucket \n[%(default)s].")
     ap.add_argument("--path-env-file", default="../.env",
         help="Path to the hidden credentials file [%(default)s].")
     ap.add_argument("--max-tile-size", type=int, default=1_024,
@@ -575,7 +601,7 @@ if __name__ == "__main__":
                     choices=["cpu", "cuda", "mps"],
                     help="Device name [%(default)s].")
     ap.add_argument("--collection-name",
-        choices=["Landsat", "S2", "both"], default="both",
+        choices=["Landsat", "S2"], default="S2",
         help="Collection name to predict on [%(default)s].")
     args = ap.parse_args()
 
@@ -588,20 +614,24 @@ if __name__ == "__main__":
                 f"Device '{args.device_name}' is not available. "
                 f"Run with --device-name cpu")
 
-    if args.collection_name == "both":
-        collections = ["Landsat", "S2"]
-    else:
-        collections = [args.collection_name]
+    # Parse the processing date range
+    _start = datetime.strptime(args.start_date, "%Y-%m-%d")\
+                     .replace(tzinfo=timezone.utc)
+    _end = datetime.strptime(args.end_date, "%Y-%m-%d")\
+                   .replace(tzinfo=timezone.utc)
+    start_date, end_date = sorted([_start, _end])
 
-    for collection_name in collections:
-        print(f"[INFO] Running inference for {collection_name}.")
-        main(session_code=args.session_code,
-             experiment_name=args.model_name,
-             path_env_file=args.path_env_file,
-             device_name=args.device_name,
-             max_tile_size=args.max_tile_size,
-             th_water=args.th_water,
-             overwrite=args.overwrite,
-             th_brightness=args.th_brightness,
-             collection_name=collection_name,
-             distinguish_flood_traces=args.distinguish_flood_traces)
+    main(path_aois=args.path_aois,
+         lga_names=args.lga_names,
+         start_date=start_date,
+         end_date=end_date,
+         experiment_name=args.model_name,
+         bucket_uri=args.bucket_uri,
+         path_env_file=args.path_env_file,
+         device_name=args.device_name,
+         max_tile_size=args.max_tile_size,
+         th_water=args.th_water,
+         overwrite=args.overwrite,
+         th_brightness=args.th_brightness,
+         collection_name=args.collection_name,
+         distinguish_flood_traces=args.distinguish_flood_traces)
