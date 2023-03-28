@@ -32,6 +32,9 @@ from skimage.morphology import binary_dilation, disk
 from dotenv import load_dotenv
 from db_utils import DB
 
+# Set bucket will not be requester pays
+utils.REQUESTER_PAYS_DEFAULT = False
+
 # DEBUG
 warnings.filterwarnings("ignore")
 

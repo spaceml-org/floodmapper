@@ -176,20 +176,6 @@ AoIs) from the database. The argument ```--distinguish-flood-traces```
 applies a union of ML-derived water masks and a MNDWI threshold for
 better sensitivity.
 
-Note that the inference task must be applied to each
-satellite separately and should be run a second time with the
-```--collection-name Landsat``` argument.
-
-```
-# Run separately for Landsat
-python 02_run_inference.py \
-    --session-code EMSR586 \
-    --model-name WF2_unet_rbgiswirs \
-    --path-env-file ../.env \
-    --collection-name Landsat \
-    --distinguish-flood-traces \
-    --overwrite
-```
 
 At this point, each valid grid position in the GCP bucket contains
 raster maps of water and cloud probability, alongside vectorised

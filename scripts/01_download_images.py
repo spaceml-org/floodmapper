@@ -24,6 +24,9 @@ from tqdm import tqdm as tq
 from dotenv import load_dotenv
 from db_utils import DB
 
+# Set bucket will not be requester pays
+utils.REQUESTER_PAYS_DEFAULT = False
+
 # DEBUG
 warnings.filterwarnings("ignore")
 
@@ -212,7 +215,7 @@ def main(session_code: str,
          threshold_invalids_flood: float = 0.7,
          threshold_invalids_ref: float = 0.1,
          collection_placeholder: str = "all",
-         bucket_uri: str = "gs://floodmapper-demo",
+         bucket_uri: str = "",
          path_env_file: str = "../.env",
          only_one_previous: bool = False,
          channel_configuration:str = "bgriswirs",
@@ -248,21 +251,25 @@ def main(session_code: str,
         period_ref_start = ref_start_date
         period_ref_end = ref_end_date
 
-    # Parse the bucket URI and name
-    rel_grid_path = "0_DEV/1_Staging/GRID"
-    bucket_grid_path = os.path.join(bucket_uri, rel_grid_path)
-    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
-    print(f"[INFO] Will download files to:\n\t{bucket_grid_path}")
-
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
     if success:
         print(f"[INFO] Loaded environment from '{path_env_file}' file.")
         print(f"\tKEY FILE: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
         print(f"\tPROJECT: {os.environ['GS_USER_PROJECT']}")
+        if bucket_uri == "":
+            bucket_uri = os.environ["BUCKET_URI"]
+            assert bucket_uri is not None and bucket_uri != "", f"Bucket name not defined {bucket_uri}"
+            print(f"Bucket uri loaded from .env file {bucket_uri}")
     else:
         sys.exit(f"[ERR] Failed to load the environment file:\n"
                  f"\t'{path_env_file}'")
+
+    # Parse the bucket URI and name
+    rel_grid_path = "0_DEV/1_Staging/GRID"
+    bucket_grid_path = os.path.join(bucket_uri, rel_grid_path)
+    bucket_name = bucket_uri.replace("gs://","").split("/")[0]
+    print(f"[INFO] Will download files to:\n\t{bucket_grid_path}")
 
     # Connect to the FloodMapper DB
     db_conn = DB(dotenv_path=path_env_file)
@@ -789,7 +796,7 @@ if __name__ == '__main__':
         choices=["Landsat", "S2", "all"], default="all",
         help="GEE collection to download data from [%(default)s].")
     ap.add_argument("--bucket-uri",
-        default="gs://floodmapper-demo",
+        default="",
         help="Root URI of the GCP bucket \n[%(default)s].")
     ap.add_argument("--path-env-file", default="../.env",
         help="Path to the hidden credentials file [%(default)s].")
