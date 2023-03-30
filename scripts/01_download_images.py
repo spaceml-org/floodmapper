@@ -259,7 +259,8 @@ def main(session_code: str,
         print(f"\tPROJECT: {os.environ['GS_USER_PROJECT']}")
         if bucket_uri == "":
             bucket_uri = os.environ["BUCKET_URI"]
-            assert bucket_uri is not None and bucket_uri != "", f"Bucket name not defined {bucket_uri}"
+            if bucket_uri is None or bucket_uri == "":
+                sys.exit(f"[ERR] Bucket URI not defined!")
             print(f"Bucket uri loaded from .env file {bucket_uri}")
     else:
         sys.exit(f"[ERR] Failed to load the environment file:\n"
@@ -267,7 +268,8 @@ def main(session_code: str,
 
     # Parse the bucket URI and name
     rel_grid_path = "0_DEV/1_Staging/GRID"
-    bucket_grid_path = os.path.join(bucket_uri, rel_grid_path)
+    bucket_grid_path = os.path.join(bucket_uri,
+                                    rel_grid_path).replace("\\", "/")
     bucket_name = bucket_uri.replace("gs://","").split("/")[0]
     print(f"[INFO] Will download files to:\n\t{bucket_grid_path}")
 
@@ -485,7 +487,7 @@ def main(session_code: str,
             fileNamePrefix = os.path.join(rel_grid_path,
                                           name,
                                           constellation,
-                                          solar_day)
+                                          solar_day).replace("\\", "/")
             tq.write(f"\t{fileNamePrefix}")
             desc = f"{name}_{constellation}_{solar_day}"
 
@@ -657,7 +659,7 @@ def main(session_code: str,
 
             data_path = os.path.join(bucket_uri, rel_grid_path,
                                      name, constellation,
-                                     f"{solar_day}.tif")
+                                     f"{solar_day}.tif").replace("\\", "/")
 
             tq.write("\tUpdating database with image details.")
             do_update_download(db_conn, desc, name, constellation,
@@ -705,9 +707,10 @@ def main(session_code: str,
                 tq.write("\tImage NOT already downloaded.")
             lon, lat = list(aoi_geom.geometry.centroid.coords)[0]
             crs = ee_download.convert_wgs_to_utm(lon=lon, lat=lat)
-            folder_dest_permament = os.path.join(bucket_grid_path,
-                                                 aoi_geom.patch_name,
-                                                 "PERMANENTWATERJRC")
+            folder_dest_permament = os.path.join(
+                bucket_grid_path,
+                aoi_geom.patch_name,
+                "PERMANENTWATERJRC").replace("\\", "/")
 
             # Command the latest permanent water layer be downloaded.
             # Method returns a GEE task if successful, or None otherwise.

@@ -1,6 +1,7 @@
 import os
 import sys
 os.environ['USE_PYGEOS'] = '0'
+from dotenv import load_dotenv
 
 import torch
 from ml4floods.data import create_gt
@@ -15,6 +16,7 @@ from ml4floods.models.utils.configuration import AttrDict
 from ml4floods.data.worldfloods import dataset
 from ml4floods.models import postprocess
 import rasterio
+import rasterio.session
 from ml4floods.data import save_cog, utils
 import numpy as np
 from datetime import datetime
@@ -29,7 +31,6 @@ from ml4floods.models.postprocess import get_pred_mask_v2
 from typing import Tuple, Callable, Any, Optional
 from ml4floods.data.worldfloods.configs import BANDS_S2, BANDS_L8
 from skimage.morphology import binary_dilation, disk
-from dotenv import load_dotenv
 from db_utils import DB
 
 # Set bucket will not be requester pays
@@ -87,7 +88,7 @@ def load_inference_function(
     model_path.rstrip("/")
     experiment_name = os.path.basename(model_path)
     model_folder = os.path.dirname(model_path)
-    config_fp = os.path.join(model_path, "config.json")
+    config_fp = os.path.join(model_path, "config.json").replace("\\", "/")
     print(f"[INFO] Loading model configuraton from here:\n\t{config_fp}")
     config = get_default_config(config_fp)
     # The max_tile_size param controls the max size of patches that are fed to
@@ -197,8 +198,6 @@ def load_inference_function(
             return land_water_cloud, pred
 
     return predict, config
-
-
 
 
 def check_exist(db_conn, image_id, model_id):
@@ -316,6 +315,10 @@ def main(session_code: str,
     # Connect to the FloodMapper DB
     db_conn = DB(dotenv_path=path_env_file)
 
+    # Create rasterio GSSession
+    key_file_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+    rasterio.session.GSSession(google_application_credentials=key_file_path)
+
     # Fetch the session parameters from the database
     query = (f"SELECT flood_date_start, flood_date_end, "
              f"ref_date_start, ref_date_end, bucket_uri "
@@ -328,12 +331,12 @@ def main(session_code: str,
     ref_start_date = session_df.iloc[0]["ref_date_start"]
     ref_end_date = session_df.iloc[0]["ref_date_end"]
     bucket_uri = session_df.iloc[0]["bucket_uri"]
-    
+
     # Parse the bucket URI and model name
     rel_model_path = "0_DEV/2_Mart/2_MLModelMart"
     model_path = os.path.join(bucket_uri,
                               rel_model_path,
-                              experiment_name)
+                              experiment_name).replace("\\", "/")
     bucket_name = bucket_uri.replace("gs://","").split("/")[0]
     print(f"[INFO] Full model path:\n\t{model_path}")
 
@@ -392,6 +395,9 @@ def main(session_code: str,
     print(f"[INFO] {len(images_predict)} images queued for inference. ")
     for total, filename in tq(enumerate(images_predict), total=num_images):
 
+        # Format the filename on Windows
+        filename = filename.replace("\\", "/")
+
         # Compute folder name to save the predictions if not provided
         output_folder_grid = os.path.dirname(os.path.dirname(filename))
         output_folder_model = os.path.join(output_folder_grid,
@@ -404,14 +410,16 @@ def main(session_code: str,
                                             experiment_name + "_cont",
                                             collection_name).replace("\\", "/")
         filename_save = os.path.join(output_folder_model,
-                                     os.path.basename(filename))
+                                os.path.basename(filename)).replace("\\", "/")
         filename_save_cont = os.path.join(output_folder_model_cont,
-                                          os.path.basename(filename))
-        filename_save_vect = os.path.join(output_folder_model_vec,
-                f"{os.path.splitext(os.path.basename(filename))[0]}.geojson")
+                                os.path.basename(filename)).replace("\\", "/")
+        filename_save_vect = os.path.join(
+            output_folder_model_vec,
+            f"{os.path.splitext(
+            os.path.basename(filename))[0]}.geojson").replace("\\", "/")
         path_split = os.path.splitext(filename_save)[0].split('/')
         patch_name, model_id, satellite, date = path_split[-4:]
-        image_id = "_".join([patch_name, satellite, date])
+        image_id = "_".join([patch_name, satellite, date]).replace("\\", "/")
 
         # Print a title
         tq.write("\n" + "-"*80 + "\n")

@@ -167,9 +167,11 @@ def main(session_code: str,
     # Construct the GCP paths
     rel_grid_path = "0_DEV/1_Staging/GRID"
     rel_operation_path = "0_DEV/1_Staging/operational"
-    grid_path = os.path.join(bucket_uri, rel_grid_path)
+    grid_path = os.path.join(bucket_uri, rel_grid_path).replace("\\", "/")
     bucket_name = bucket_uri.replace("gs://","").split("/")[0]
-    session_path = os.path.join(bucket_uri, rel_operation_path, session_code)
+    session_path = os.path.join(bucket_uri,
+                                rel_operation_path,
+                                session_code).replace("\\", "/")
     fs = utils.get_filesystem(grid_path)
     print(f"[INFO] Will read inference products from:\n\t{grid_path}")
     print(f"[INFO] Will write mapping products to:\n\t{session_path}")
@@ -389,7 +391,7 @@ def main(session_code: str,
     path_flood_merge = \
         os.path.join(session_path,
                      (f"flood_{flood_start_date_str}_"
-                      f"{flood_end_date_str}.geojson"))
+                      f"{flood_end_date_str}.geojson")).replace("\\", "/")
 
     # Perform the merge
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -430,7 +432,7 @@ def main(session_code: str,
             os.path.join(session_path,
                          (f"inundate_{ref_end_date_str}_"
                           f"{flood_start_date_str}_"
-                          f"{flood_end_date_str}.geojson"))
+                          f"{flood_end_date_str}.geojson")).replace("\\", "/")
 
         # Perform the merge
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
