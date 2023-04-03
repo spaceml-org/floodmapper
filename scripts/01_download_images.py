@@ -202,6 +202,15 @@ def do_update_download(db_conn, desc, name=None, constellation=None,
             cloud_probability, valids, status, data_path)
     db_conn.run_query(query, data)
 
+def do_update_download_status(db_conn, image_id, status, data_path):
+    """
+    Query to update the download table with download in progress or complete.
+    """
+    query = (f"UPDATE image_downloads "
+             f"SET status = %s, data_path = %s "
+             f"WHERE image_id = %s")
+    data = (status, data_path, image_id)
+    db_conn.run_query(query, data)
 
 def main(session_code: str,
          path_aois: str,
@@ -488,6 +497,11 @@ def main(session_code: str,
                                           name,
                                           constellation,
                                           solar_day).replace("\\", "/")
+            # Full path includes extension as well as the bucket uri
+            data_path = os.path.join(bucket_uri, rel_grid_path,
+                                     name, constellation,
+                                     f"{solar_day}.tif").replace("\\", "/")
+
             tq.write(f"\t{fileNamePrefix}")
             desc = f"{name}_{constellation}_{solar_day}"
 
@@ -501,7 +515,6 @@ def main(session_code: str,
             #        0 = not downloaded (e.g., because of failed threshold)
             #        1 = downloaded successfully
             #       -1 = download in progress or failed
-            do_download = False
             tq.write("\tQuerying database for existing image.")
             query = (f"SELECT image_id, status "
                      f"FROM image_downloads "
@@ -520,15 +533,24 @@ def main(session_code: str,
                     tq.write("downloaded.")
                     tq.write("\tSkipping existing image.")
                     continue
-                else:
-                    tq.write("NOT downloaded.")
-                    tq.write("\tWill process as normal.")
+                
+                fs_data_path = utils.get_filesystem(data_path)
+
+                if fs_data_path.exists(data_path):
+                    # update database
+                    do_update_download_status(db_conn, desc, 1, data_path)
+                    tq.write("downloaded. Updating status in database.")
+                    tq.write("\tSkipping existing image.")
+                    continue
+                
+                tq.write("NOT downloaded.")
+                tq.write("\tWill process as normal.")
 
             # Address current grid position and calculate overlap with grid
             polygon_grid = aois_indexed.loc[name, "geometry"]
             polygon_images_sat = images_day_sat.geometry.unary_union
-            valid_percentage = (polygon_grid.intersection(polygon_images_sat)\
-                                .area / polygon_grid.area)
+            valid_percentage = polygon_grid.intersection(polygon_images_sat)\
+                                .area / polygon_grid.area
 
             # Format variables for use with GEE
             polygon_grid_ee = ee.Geometry(mapping(polygon_grid))
@@ -657,10 +679,6 @@ def main(session_code: str,
 
             # Database Update block ------------------------------------------#
 
-            data_path = os.path.join(bucket_uri, rel_grid_path,
-                                     name, constellation,
-                                     f"{solar_day}.tif").replace("\\", "/")
-
             tq.write("\tUpdating database with image details.")
             do_update_download(db_conn, desc, name, constellation,
                                solar_day, utcdatetime_save, solardatetime_save,
@@ -728,7 +746,7 @@ def main(session_code: str,
                 tasks.append(task_permanent)
                 do_update_download(db_conn,
                                    image_id,
-                                   patch_name,
+                                   aoi_geom.patch_name,
                                    'PERMANENTWATERJRC',
                                    f"{flood_start_date.year}-01-01",
                                    None,
