@@ -738,6 +738,7 @@ def main(session_code: str,
                 date_search=flood_start_date,
                 path_bucket=folder_dest_permament,
                 name_task=f"{aoi_geom.patch_name}_PERMANENTWATERJRC",
+                requester_pays=False,
                 crs=crs)
 
             # Append download tasks to the task list and update in the database
