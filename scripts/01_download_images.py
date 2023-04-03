@@ -496,11 +496,11 @@ def main(session_code: str,
             fileNamePrefix = os.path.join(rel_grid_path,
                                           name,
                                           constellation,
-                                          solar_day)
+                                          solar_day).replace("\\", "/")
             # Full path includes extension as well as the bucket uri
             data_path = os.path.join(bucket_uri, rel_grid_path,
                                      name, constellation,
-                                     f"{solar_day}.tif")
+                                     f"{solar_day}.tif").replace("\\", "/")
 
             tq.write(f"\t{fileNamePrefix}")
             desc = f"{name}_{constellation}_{solar_day}"
