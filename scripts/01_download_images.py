@@ -533,7 +533,7 @@ def main(session_code: str,
                     tq.write("downloaded.")
                     tq.write("\tSkipping existing image.")
                     continue
-                
+
                 fs_data_path = utils.get_filesystem(data_path)
 
                 if fs_data_path.exists(data_path):
@@ -542,7 +542,7 @@ def main(session_code: str,
                     tq.write("downloaded. Updating status in database.")
                     tq.write("\tSkipping existing image.")
                     continue
-                
+
                 tq.write("NOT downloaded.")
                 tq.write("\tWill process as normal.")
 

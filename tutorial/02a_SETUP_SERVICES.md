@@ -41,7 +41,7 @@ Gmail account).
 
 The FloodMapper processing machine needs to be configured to access
 Google Earth Engine. Virtual machines (VMs) hosted on GCP are are authenticated
-by default if the user is logged into GCP using a GEE-registered
+by default if the user is are logged into GCP using a GEE-registered
 account. For other (external-to-GCP) machines, authenticating is as
 simple as running a terminal command, followed by logging into GEE via
 the browser. Credentials are saved to the local machine after the
