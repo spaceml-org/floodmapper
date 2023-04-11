@@ -138,3 +138,6 @@ test_inference.ipynb
 
 # JSON Logs
 *.json
+
+# TIF files 
+*.tif
