@@ -413,10 +413,8 @@ def main(session_code: str,
                                 os.path.basename(filename)).replace("\\", "/")
         filename_save_cont = os.path.join(output_folder_model_cont,
                                 os.path.basename(filename)).replace("\\", "/")
-        filename_save_vect = os.path.join(
-            output_folder_model_vec,
-            f"{os.path.splitext(
-            os.path.basename(filename))[0]}.geojson").replace("\\", "/")
+        filename_save_vect = os.path.join(output_folder_model_vec,
+                f"{os.path.splitext(os.path.basename(filename))[0]}.geojson").replace("\\", "/")
         path_split = os.path.splitext(filename_save)[0].split('/')
         patch_name, model_id, satellite, date = path_split[-4:]
         image_id = "_".join([patch_name, satellite, date]).replace("\\", "/")
