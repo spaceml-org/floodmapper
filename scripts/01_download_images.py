@@ -202,6 +202,7 @@ def do_update_download(db_conn, desc, name=None, constellation=None,
             cloud_probability, valids, status, data_path)
     db_conn.run_query(query, data)
 
+
 def do_update_download_status(db_conn, image_id, status, data_path):
     """
     Query to update the download table with download in progress or complete.
@@ -211,6 +212,7 @@ def do_update_download_status(db_conn, image_id, status, data_path):
              f"WHERE image_id = %s")
     data = (status, data_path, image_id)
     db_conn.run_query(query, data)
+
 
 def main(session_code: str,
          path_aois: str,
