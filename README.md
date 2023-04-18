@@ -14,7 +14,8 @@ enhanced using support from the UK Space Agency.
 In this repository:
  * [scripts](scripts) ... Contains the core tasks for creating flood maps.
  * [tutorial](tutorial) ... End-to-end instructions on using FloodMapper.
- * [resources](resources) ... Files used by the pipeline.
+ * [deploy_boulia](deploy_boulia) ... Minimal FloodMapper deployment example.
+ * [resources](resources) ... Files used by the pipeline and tutorial.
  * [flood-activations](flood-activations) ... Local flooding event files.
 
 
