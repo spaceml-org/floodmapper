@@ -48,6 +48,19 @@ After the postprocessingscript has completed, the final maps will be
 available on the GCP bucket under the ```operational/boulia_test```
 folder.
 
-## 4. Monitor mapping progress
+## 4. Monitor download and mapping progress
 
- * [04_Monitor_Downloads.ipynb](04_Monitor_Downloads.ipynb)
+Progress of the download and mapping tasks can be monitored using the
+following notebooks.
+
+ * [03_Monitor_Downloads.ipynb](03_Monitor_Downloads.ipynb)
+ 
+ * [04_Monitor_Mapping.ipynb](04_Monitor_Mapping.ipynb)
+
+
+## 5. Visualise and validate the flood-extent map
+
+The following notebook loads the floodmap and plots it over the
+satellite data.
+
+ * [05_Validate_Map.ipynb](05_Validate_Map.ipynb)
