@@ -364,6 +364,10 @@ def main(session_code: str,
     ee_collection_placeholder  = "both" if collection_placeholder == "all" \
         else collection_placeholder
 
+    # Initialize the GEE connection
+    print("[INFO] Querying Google Earth Engine for flooding images.")
+    ee.Initialize()
+
     # Query data available during the flood event and set label
     print("[INFO] Querying Google Earth Engine for flooding images.")
     images_available_gee_flood = ee_query.query(

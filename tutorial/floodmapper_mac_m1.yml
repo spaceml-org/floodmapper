@@ -1,7 +1,7 @@
 name: floodmapper
 channels:
-  - pytorch-nightly
   - conda-forge
+  - pytorch-nightly
 dependencies:
     - python=3.9
     - pip>=19.0
