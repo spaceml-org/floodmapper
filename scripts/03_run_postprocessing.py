@@ -10,6 +10,7 @@ from tqdm import tqdm as tq
 from datetime import datetime, timezone
 
 from db_utils import DB
+from merge_utils import vectorize_outputv1, calc_maximal_floodraster
 from ml4floods.data import utils
 from ml4floods.models import postprocess
 from dotenv import load_dotenv
@@ -37,7 +38,7 @@ def _key_sort(x):
 
 
 def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
-                        load_existing=False):
+                        load_existing=False, pred_mode="vect"):
     """
     Perform time-aggregation on a list of GeoJSONs.
     """
@@ -55,9 +56,13 @@ def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
         # Perform the time aggregation on the list of GeoJSONs
         num_files = len(geojsons_lst)
         tq.write(f"\tPerforming temporal aggregation of {num_files} files.")
-        aggregate_floodmap = \
-            postprocess.get_floodmap_post(geojsons_lst,
-                                          mode="max")#.to_crs('epsg:4326')
+        if pred_mode=="vect":
+            aggregate_floodmap = \
+                postprocess.get_floodmap_post(geojsons_lst,
+                                              mode="max")#.to_crs('epsg:4326')
+        else:
+            _, _, aggregate_floodmap = \
+                calc_maximal_floodraster(geojsons_lst, verbose=False)
 
         # Add the permanent water polygons
         if permanent_water_map is not None:
@@ -126,7 +131,8 @@ def main(session_code: str,
          path_env_file: str = "../.env",
          collection_name: str = "all",
          model_name: str = "all",
-         overwrite: bool=False):
+         overwrite: bool=False,
+         raster_merge: bool=False):
 
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
@@ -158,6 +164,12 @@ def main(session_code: str,
     create_inundate_map = False
     if ref_start_date is not None and ref_end_date is not None:
         create_inundate_map = True
+
+    # Set raster merge mode
+    pred_mode = "vect"
+    if raster_merge:
+        pred_mode = "pred"
+    print(f"[INFO] Raster merge mode is '{pred_mode}'")
 
     # Parse flood dates to strings (used as filename roots on GCP)
     flood_start_date_str = flood_start_date.strftime("%Y-%m-%d")
@@ -225,7 +237,7 @@ def main(session_code: str,
                  f"WHERE patch_name = %s "
                  f"AND satellite IN %s "
                  f"AND mode = %s")
-        data = [aoi, sat_dict[collection_name], 'vect']
+        data = [aoi, sat_dict[collection_name], pred_mode]
         if not model_name == "all":
             query += f"AND model_id = %s"
             data.append(model_name)
@@ -277,7 +289,8 @@ def main(session_code: str,
         best_flood_map = do_time_aggregation(geojsons_flood,
                                              flood_path,
                                              permanent_water_map,
-                                             not(overwrite))
+                                             not(overwrite),
+                                             pred_mode)
 
         # Update the with the details of the aggregate and set 'status' = 1
         if best_flood_map is not None:
@@ -315,7 +328,8 @@ def main(session_code: str,
             best_ref_map = do_time_aggregation(geojsons_ref,
                                                ref_path,
                                                permanent_water_map,
-                                               not(overwrite))
+                                               not(overwrite),
+                                               pred_mode)
             if best_ref_map is not None:
                 do_update_temporal(db_conn, bucket_uri, session_code, aoi,
                                    model_name, ref_start_date, ref_end_date,
@@ -500,10 +514,13 @@ if __name__ == "__main__":
         help=(f"Overwrite existing temporal merge products.\n"
               f"Default is to re-create all temporal products before "
               f"performing spatial merge."))
+    ap.add_argument('--raster-merge', default=False, action='store_true',
+        help=f"Perform temporal merge step in raster-space.\n")
     args = ap.parse_args()
 
     main(session_code=args.session_code,
          path_env_file=args.path_env_file,
          collection_name=args.collection_name,
          model_name=args.model_name,
-         overwrite=args.overwrite)
+         overwrite=args.overwrite,
+         raster_merge=args.raster_merge)
