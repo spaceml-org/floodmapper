@@ -7,6 +7,7 @@ import rasterio
 from rasterio.io import MemoryFile
 from rasterio import Affine as A
 from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.transform import from_origin
 from skimage.morphology import binary_dilation, disk
 from ml4floods.models import postprocess
 
@@ -67,94 +68,90 @@ def vectorize_outputv1(prediction: np.ndarray,
     return None
 
 
-def calc_maximal_floodraster(geojsons_lst, verbose=False):
+def get_transform_from_geom(geom, num_pixels=2500):
+    """
+    Extract an Affine transformation from a geometry, given a pixel scale
+    """
+
+    west = geom.bounds[0]
+    south = geom.bounds[1]
+    east = geom.bounds[2]
+    north = geom.bounds[3]
+    xsize = abs(east - west)/num_pixels
+    ysize = abs(north - south)/num_pixels
+
+    # Get the transformation from_origin(west, north, xsize, ysize)
+    transform = from_origin(west, north, xsize, ysize)
+    return transform
+
+
+def calc_maximal_floodraster(geojsons_lst, head_dict, verbose=False):
     """
     Calculate the maximal flood extent from the integer-based
     raster flood masks.
     """
 
-    is_first = True
+    # Initialise masks for performing the accumulation
+    out_raster = np.zeros(shape=(head_dict['height'],
+                                 head_dict['width']), dtype=np.uint8)
+    valid = np.zeros(shape=(head_dict['height'],
+                            head_dict['width']), dtype=bool)
+    water = valid.copy()
+    cloud = valid.copy()
+    flood_trace = valid.copy()
+
+    # Process the input geojsons in turn
     geojsons_lst.sort(reverse=True) # Sort so that S2 is first
     for filename in geojsons_lst:
+
         if verbose:
             sat_file = "_".join(pathlib.Path(filename).parts[-2:])
             print(f"[INFO] temporal merge '{sat_file}'")
+
         with rasterio.open(filename) as src:
-            if is_first:
-                is_first = False
-                # Read the header and raster array
-                profile = src.profile.copy()
-                band1 = src.read(1)
-                # Record the target CRS and dimensions
-                dst_crs = src.crs
-                dst_width = src.width
-                dst_height = src.height
-                dst_bounds = src.bounds
-                # Create the initial masks
-                valid = band1 != 0
-                water = band1 == 2
-                cloud = band1 == 3
-                flood_trace = band1 == 4
-            else:
-                # Calculate the output transformation matrix
-                dst_transform, dst_width, dst_height = \
-                calculate_default_transform(
-                    src.crs,
-                    dst_crs,
-                    dst_width,
-                    dst_height,
-                    *dst_bounds)
-                # Build a new header
-                dst_kwargs = src.meta.copy()
-                dst_kwargs.update({
-                    'crs': dst_crs,
-                    'transform': dst_transform,
-                    'width': dst_width,
-                    'height': dst_height,
-                    'nodata': 0
-                })
-                # Perform operations in memory
-                with MemoryFile() as memfile:
-                    # Reproject band 1 to a memory file
-                    with memfile.open(**dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1),
-                            destination=rasterio.band(dst, 1),
-                            src_transform=src.transform,
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs=dst_crs,
-                            resampling=Resampling.nearest)
-                            #resampling=Resampling.bilinear)
-                    # Accumulate the masks onto the final arrays
-                    with memfile.open() as mch:
-                        band1 = mch.read(1)
-                        # Water always accumulates into a maximum extent
-                        water += (band1 == 2)
-                        # Flood_trace accumulates, except
-                        # where it converts to water
-                        flood_trace += (band1 == 4)
-                        flood_trace = np.where(water, False, flood_trace)
-                        # Cloud accumulates, but is nulified by water,
-                        # flood_trace and land. Aim is to only have cloud
-                        # masks where no data exists because of clouds.
-                        cloud += (band1 == 3)
-                        cloud = np.where(water, False, cloud)
-                        cloud = np.where(flood_trace, False, cloud)
-                        land = (band1 != 0) & (band1 != 2) & (band1 != 3) & (band1 != 4)
-                        cloud = np.where(land, False, cloud)
-                        # Valid data accumulates as a maximum extent
-                        valid += (band1 != 0)
+            # Build a new header for transformed (warped) file
+            dst_kwargs = src.meta.copy()
+            dst_kwargs.update({
+                'crs': head_dict['crs'],
+                'transform': head_dict['transform'],
+                'width': head_dict['width'],
+                'height': head_dict['height'],
+                'nodata': 0
+            })
+
+            # Perform operations in memory
+            with MemoryFile() as memfile:
+                # Reproject band1 to a memory file
+                with memfile.open(**dst_kwargs) as dst:
+                    reproject(
+                        source=rasterio.band(src, 1),
+                        destination=rasterio.band(dst, 1),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=head_dict['transform'],
+                        dst_crs=head_dict['crs'],
+                        resampling=Resampling.nearest)
+                # Read the memory file and accumulate the masks
+                with memfile.open() as mch:
+                    band1 = mch.read(1)
+                    # Water always accumulates into a maximum extent
+                    water += (band1 == 2)
+                    # Flood_trace accumulates, except where it converts to water
+                    flood_trace += (band1 == 4)
+                    flood_trace = np.where(water, False, flood_trace)
+                    # Cloud accumulates in a bitwide AND sense
+                    cloud = (cloud & (band1 == 3))
+                    # Valid data accumulates as a maximum extent
+                    valid += (band1 != 0)
 
     # Assemble the final array
-    out_raster = np.zeros_like(band1)
     out_raster = np.where(valid, 1, out_raster)
     out_raster = np.where(cloud, 3, out_raster)
     out_raster = np.where(flood_trace, 4, out_raster)
     out_raster = np.where(water, 2, out_raster)
 
     # Vectorise the output
-    floodmap = vectorize_outputv1(out_raster, profile['crs'],
-                                  profile['transform'])
+    floodmap = vectorize_outputv1(out_raster, head_dict['crs'],
+                                  head_dict['transform'])
 
-    return out_raster, profile, floodmap
+    return out_raster, floodmap
