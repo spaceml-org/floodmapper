@@ -166,7 +166,8 @@ def main(session_code: str,
          collection_name: str = "all",
          model_name: str = "all",
          overwrite: bool=False,
-         raster_merge: bool=False):
+         raster_merge: bool=False,
+         save_gpkg: bool=False):
 
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
@@ -451,10 +452,12 @@ def main(session_code: str,
         os.path.join(session_path,
                      (f"flood_{flood_start_date_str}_"
                       f"{flood_end_date_str}.geojson")).replace("\\", "/")
+    file_flood_gpkg = (f"flood_{session_code}_{flood_start_date_str}_"
+                       f"{flood_end_date_str}.gpkg").replace("\\", "/")
 
     # Perform the merge
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[INFO] Starting spatial merge ... {now} ...")
+    print(f"[INFO] Starting spatial merge at {now} ...")
     try:
         flood_map_merge = postprocess.spatial_aggregation(geojsons_lst)
         flood_map_merge.to_crs(epsg=3857, inplace=True)
@@ -470,6 +473,12 @@ def main(session_code: str,
         do_update_spatial(db_conn, bucket_uri, session_code,
                           "flood", path_flood_merge,
                           flood_start_date, flood_end_date)
+
+        # Save a local geopackage file
+        if save_gpkg:
+            print(f"[INFO] Saving the final FLOOD map to local GPKG:\n"
+              f"\t{file_flood_gpkg}")
+            flood_map_merge.to_file(file_flood_gpkg, driver='GPKG')
 
     except Exception:
         print("\t[ERR] Spatial merger failed!\n")
@@ -561,6 +570,8 @@ if __name__ == "__main__":
               f"performing spatial merge."))
     ap.add_argument('--raster-merge', default=False, action='store_true',
         help=f"Perform temporal merge step in raster-space.\n")
+    ap.add_argument('--save-gpkg', default=False, action='store_true',
+        help=f"Save a local GeoPackage flood map file.\n")
     args = ap.parse_args()
 
     main(session_code=args.session_code,
@@ -568,4 +579,5 @@ if __name__ == "__main__":
          collection_name=args.collection_name,
          model_name=args.model_name,
          overwrite=args.overwrite,
-         raster_merge=args.raster_merge)
+         raster_merge=args.raster_merge,
+         save_gpkg=args.save_gpkg)
