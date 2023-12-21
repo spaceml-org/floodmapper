@@ -565,8 +565,8 @@ if __name__ == "__main__":
         choices=["WF2_unet_rbgiswirs", "all"], default="all",
         help="Model outputs to include in the postprocessing. [%(default)s].")
     ap.add_argument('--overwrite', default=False, action='store_true',
-        help=(f"Overwrite existing temporal merge products.\n"
-              f"Default is to re-create all temporal products before "
+        help=(f"Overwrite (re-create) existing temporal merge products.\n"
+              f"Default is to reload existing temporal products before "
               f"performing spatial merge."))
     ap.add_argument('--raster-merge', default=False, action='store_true',
         help=f"Perform temporal merge step in raster-space.\n")
