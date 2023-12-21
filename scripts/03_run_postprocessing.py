@@ -8,8 +8,12 @@ import pandas as pd
 import psycopg2
 from tqdm import tqdm as tq
 from datetime import datetime, timezone
+from rasterio import CRS
 
 from db_utils import DB
+from merge_utils import vectorize_outputv1
+from merge_utils import get_transform_from_geom
+from merge_utils import calc_maximal_floodraster
 from ml4floods.data import utils
 from ml4floods.models import postprocess
 from dotenv import load_dotenv
@@ -36,8 +40,35 @@ def _key_sort(x):
     return date + append
 
 
+def get_patch_header(db_conn, patch_name, num_pixels=2500):
+    """
+    Query the patch geometry and generate the header variables necessary
+    for creating a geolocated raster file.
+    """
+
+    # Query the DB for the patch geometry
+    query = (f"SELECT patch_name, ST_AsText(geometry) "
+             f"FROM grid_loc "
+             f"WHERE patch_name = %s;")
+    data = [patch_name]
+    grid_df = db_conn.run_query(query, data, fetch= True)
+    grid_df['geometry'] = gpd.GeoSeries.from_wkt(grid_df['st_astext'])
+    grid_df.drop(['st_astext'], axis=1, inplace = True)
+    grid_gdf = gpd.GeoDataFrame(grid_df, geometry='geometry', crs="EPSG:4326")
+
+    # Calculate the transformation matrix
+    geom_ = grid_gdf.loc[0, 'geometry']
+    transform = get_transform_from_geom(geom_, num_pixels)
+
+    return {"transform": transform,
+            "crs": CRS.from_epsg("4326"),
+            "height": num_pixels,
+            "width": num_pixels}
+
+
 def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
-                        load_existing=False):
+                        load_existing=False, pred_mode="vect",
+                        head_dict=None):
     """
     Perform time-aggregation on a list of GeoJSONs.
     """
@@ -55,9 +86,16 @@ def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
         # Perform the time aggregation on the list of GeoJSONs
         num_files = len(geojsons_lst)
         tq.write(f"\tPerforming temporal aggregation of {num_files} files.")
-        aggregate_floodmap = \
-            postprocess.get_floodmap_post(geojsons_lst,
-                                          mode="max")#.to_crs('epsg:4326')
+        if pred_mode=="vect":
+            aggregate_floodmap = \
+                postprocess.get_floodmap_post(geojsons_lst,
+                                              mode="max").to_crs(epsg=3857)
+        else:
+            if head_dict is None:
+                raise Exception("No header provided for temporal merge!")
+            _, aggregate_floodmap = \
+                calc_maximal_floodraster(geojsons_lst, head_dict, verbose=False)
+            aggregate_floodmap.to_crs(epsg=3857, inplace=True)
 
         # Add the permanent water polygons
         if permanent_water_map is not None:
@@ -71,6 +109,7 @@ def do_time_aggregation(geojsons_lst, data_out_path, permanent_water_map=None,
                     water_class="water")
 
         # Save output to GCP
+        aggregate_floodmap.to_crs(epsg=3857, inplace=True)
         tq.write(f"\tSaving temporal aggregation to: \n\t{data_out_path}")
         utils.write_geojson_to_gcp(data_out_path, aggregate_floodmap)
 
@@ -126,7 +165,9 @@ def main(session_code: str,
          path_env_file: str = "../.env",
          collection_name: str = "all",
          model_name: str = "all",
-         overwrite: bool=False):
+         overwrite: bool=False,
+         raster_merge: bool=False,
+         save_gpkg: bool=False):
 
     # Load the environment from the hidden file and connect to database
     success = load_dotenv(dotenv_path=path_env_file, override=True)
@@ -159,6 +200,12 @@ def main(session_code: str,
     if ref_start_date is not None and ref_end_date is not None:
         create_inundate_map = True
 
+    # Set raster merge mode
+    pred_mode = "vect"
+    if raster_merge:
+        pred_mode = "pred"
+    print(f"[INFO] Raster merge mode is '{pred_mode}'")
+
     # Parse flood dates to strings (used as filename roots on GCP)
     flood_start_date_str = flood_start_date.strftime("%Y-%m-%d")
     flood_end_date_str = flood_end_date.strftime("%Y-%m-%d")
@@ -178,7 +225,7 @@ def main(session_code: str,
     print(f"[INFO] Will read inference products from:\n\t{grid_path}")
     print(f"[INFO] Will write mapping products to:\n\t{session_path}")
 
-    # Fetch the AoI grid patches from the database
+    # Fetch the AoI grid patch names from the database
     query = (f"SELECT DISTINCT patch_name "
              f"FROM session_patches "
              f"WHERE session = %s")
@@ -225,7 +272,7 @@ def main(session_code: str,
                  f"WHERE patch_name = %s "
                  f"AND satellite IN %s "
                  f"AND mode = %s")
-        data = [aoi, sat_dict[collection_name], 'vect']
+        data = [aoi, sat_dict[collection_name], pred_mode]
         if not model_name == "all":
             query += f"AND model_id = %s"
             data.append(model_name)
@@ -273,11 +320,20 @@ def main(session_code: str,
         else:
             tq.write(f"\tFound {num_files} files during flood period.")
 
+        # Get a dictionary of header variables for the patch
+        if pred_mode=="vect":
+            head_dict = None
+        else:
+            tq.write(f"\tGenerating patch header variables")
+            head_dict = get_patch_header(db_conn, aoi, num_pixels=2500)
+
         # Perform the time aggregation on the list of GeoJSONs
         best_flood_map = do_time_aggregation(geojsons_flood,
                                              flood_path,
                                              permanent_water_map,
-                                             not(overwrite))
+                                             not(overwrite),
+                                             pred_mode,
+                                             head_dict)
 
         # Update the with the details of the aggregate and set 'status' = 1
         if best_flood_map is not None:
@@ -315,7 +371,9 @@ def main(session_code: str,
             best_ref_map = do_time_aggregation(geojsons_ref,
                                                ref_path,
                                                permanent_water_map,
-                                               not(overwrite))
+                                               not(overwrite),
+                                               pred_mode,
+                                               head_dict)
             if best_ref_map is not None:
                 do_update_temporal(db_conn, bucket_uri, session_code, aoi,
                                    model_name, ref_start_date, ref_end_date,
@@ -394,12 +452,15 @@ def main(session_code: str,
         os.path.join(session_path,
                      (f"flood_{flood_start_date_str}_"
                       f"{flood_end_date_str}.geojson")).replace("\\", "/")
+    file_flood_gpkg = (f"flood_{session_code}_{flood_start_date_str}_"
+                       f"{flood_end_date_str}.gpkg").replace("\\", "/")
 
     # Perform the merge
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[INFO] Starting spatial merge ... {now} ...")
+    print(f"[INFO] Starting spatial merge at {now} ...")
     try:
         flood_map_merge = postprocess.spatial_aggregation(geojsons_lst)
+        flood_map_merge.to_crs(epsg=3857, inplace=True)
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"[INFO] Finished merge at {now}.\n")
 
@@ -412,6 +473,12 @@ def main(session_code: str,
         do_update_spatial(db_conn, bucket_uri, session_code,
                           "flood", path_flood_merge,
                           flood_start_date, flood_end_date)
+
+        # Save a local geopackage file
+        if save_gpkg:
+            print(f"[INFO] Saving the final FLOOD map to local GPKG:\n"
+              f"\t{file_flood_gpkg}")
+            flood_map_merge.to_file(file_flood_gpkg, driver='GPKG')
 
     except Exception:
         print("\t[ERR] Spatial merger failed!\n")
@@ -441,6 +508,7 @@ def main(session_code: str,
         print(f"[INFO] Starting spatial merge ... {now} ...")
         try:
             inundate_map_merge = postprocess.spatial_aggregation(geojsons_lst)
+            inundate_map_merge.to_crs(epsg=3857, inplace=True)
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"[INFO] Finished merge at {now}.\n")
 
@@ -500,10 +568,16 @@ if __name__ == "__main__":
         help=(f"Overwrite existing temporal merge products.\n"
               f"Default is to re-create all temporal products before "
               f"performing spatial merge."))
+    ap.add_argument('--raster-merge', default=False, action='store_true',
+        help=f"Perform temporal merge step in raster-space.\n")
+    ap.add_argument('--save-gpkg', default=False, action='store_true',
+        help=f"Save a local GeoPackage flood map file.\n")
     args = ap.parse_args()
 
     main(session_code=args.session_code,
          path_env_file=args.path_env_file,
          collection_name=args.collection_name,
          model_name=args.model_name,
-         overwrite=args.overwrite)
+         overwrite=args.overwrite,
+         raster_merge=args.raster_merge,
+         save_gpkg=args.save_gpkg)
