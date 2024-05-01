@@ -41,5 +41,5 @@ dependencies:
       - pygeos
       - psycopg2
       - python-dotenv
-      - git+https://github.com/spaceml-org/georeader#egg=georeader
+      - git+https://github.com/spaceml-org/georeader#egg=georeader-spaceml
       - git+https://github.com/spaceml-org/ml4floods#egg=ml4floods

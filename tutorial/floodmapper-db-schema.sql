@@ -45,6 +45,25 @@ CREATE TABLE public.grid_loc (
 ALTER TABLE public.grid_loc OWNER TO postgres;
 
 --
+-- NEW: The world_grid table stores the global sampling grid of processing patches
+--
+
+CREATE TABLE public.world_grid (
+    patch_name character varying,
+    quadkey character varying,
+    zoom integer NOT NULL,
+    cent_x double precision,
+    cent_y double precision,
+    cos_factor double precision,
+    p_level integer NOT NULL,
+    zone character varying NOT NULL,
+    geometry public.geometry(Polygon, 4326),
+    PRIMARY KEY (patch_name)
+);
+
+ALTER TABLE public.world_grid OWNER TO postgres;
+
+--
 -- The lgas_info contains geometry information on the Local Government Areas
 --
 
