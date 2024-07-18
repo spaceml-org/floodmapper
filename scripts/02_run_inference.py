@@ -321,15 +321,13 @@ def main(session_code: str,
 
     # Fetch the session parameters from the database
     query = (f"SELECT flood_date_start, flood_date_end, "
-             f"ref_date_start, ref_date_end, bucket_uri "
+             f"bucket_uri "
              f"FROM session_info "
              f"WHERE session = %s")
     data = (session_code,)
     session_df = db_conn.run_query(query, data, fetch=True)
     flood_start_date = session_df.iloc[0]["flood_date_start"]
     flood_end_date = session_df.iloc[0]["flood_date_end"]
-    ref_start_date = session_df.iloc[0]["ref_date_start"]
-    ref_end_date = session_df.iloc[0]["ref_date_end"]
     bucket_uri = session_df.iloc[0]["bucket_uri"]
 
     # Parse the bucket URI and model name
@@ -369,14 +367,14 @@ def main(session_code: str,
              f"AND patch_name IN %s "
              f"AND status = 1 "
              f"AND ((date >= %s "
-             f"AND date <= %s) ")
+             f"AND date <= %s) );")
     data = [collection_name, tuple(aois_list), flood_start_date, flood_end_date]
-    if ref_start_date is not None and ref_end_date is not None:
-        query += (f"OR (date >= %s "
-                  f"AND date <= %s));")
-        data += [ref_start_date, ref_end_date]
-    else:
-        query += (f");")
+    #if ref_start_date is not None and ref_end_date is not None:
+    #    query += (f"OR (date >= %s "
+    #              f"AND date <= %s));")
+    #    data += [ref_start_date, ref_end_date]
+    #else:
+    #    query += (f");")
     img_df = db_conn.run_query(query, data, fetch = True)
     num_rows = len(img_df)
     print(f"[INFO] Entries for {num_rows} downloaded images in the DB.")

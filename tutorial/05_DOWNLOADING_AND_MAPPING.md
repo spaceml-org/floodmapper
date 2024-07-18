@@ -27,9 +27,7 @@ to capture both pre- and post-flood conditions.
 
 The steps perormed by the download script ```01_download_images.py``` are:
 
- * Convert a list of LGAs to small square 'patches' on a grid via
-   a database look-up, **OR**
- * Read a list of processing patches saved to a GeoJSON file on GCP.
+ * Read a list of processing patches saved to a GeoJSON file locally.
  * Query GEE for Sentinel-2 and Landsat data during the flooding event
    and at an optional reference time.
  * Determine cloud probability masks from archive data.
@@ -46,26 +44,12 @@ terminal under the ```floodmapper/scripts``` directory:
 # Change to the scripts directory
 cd scripts
 
-# Query data by pointing to a saved AoI file (can be local, or on GCP)
+# Query data by pointing to a locally saved AoI file
 python 01_download_images.py \
     --session-code EMSR586 \
     --path-aois ../flood-activations/EMSR586/patches_to_map.geojson \
     --flood-start-date 2022-07-01 \
     --flood-end-date 2022-07-24 \
-    --ref-start-date 2022-06-10 \
-    --ref-end-date 2022-06-20 \
-    --bucket-uri gs://floodmapper-demo \
-    --path-env-file ../.env
-
-# OR Query data by specifying a list of LGA names
-python 01_download_images.py \
-    --session-code EMSR586 \
-    --lga-names Newcastle,Maitland,Cessnock \
-    --flood-start-date 2022-07-01 \
-    --flood-end-date 2022-07-24 \
-    --ref-start-date 2022-06-10 \
-    --ref-end-date 2022-06-20 \
-    --bucket-uri gs://floodmapper-demo \
     --path-env-file ../.env
 ```
 
@@ -74,10 +58,10 @@ of the downloads in the background. After submitting all tasks, the
 script continues running, polling GEE every few seconds to check on the
 task status and update the database.
 
-A session code **must** be provided: the parameters of the session
-(including AoI grid patches and date-ranges) are stored in the database
-indexed by this code. The status of the GEE tasks are also tracked in
-the database.
+A session code **must** be provided so a session can be initialised:
+the parameters of the session (including AoI grid patches and
+date-ranges) are stored in the database indexed by this code. The
+status of the GEE tasks are also tracked in the database.
 
 **Note that help text for each of the three main tasks can be
   displayed by executing with a ```-h``` or ```--help``` command-line
@@ -189,7 +173,7 @@ how many times the satellites passed over).
 1_Staging
    │
    └─ GRID
-      ├─ GRID11716
+      ├─ G_10_944_611
       │  ├─ PERMANENTWATERJRC
       │  ├─ PERMANENTWATERJRC_vec     ... Permanent water polygon
       │  ├─ S2                        ... Downloaded S2 imagery
@@ -205,7 +189,7 @@ how many times the satellites passed over).
       │        └─ 2022-07-18.tif
       │
       │
-      ├─ GRID11717
+      ├─ G_10_944_611
       └─ ...
 
 ```
@@ -214,9 +198,9 @@ how many times the satellites passed over).
 ## Running the Post-Processing Steps
 
 During the post-processing step, the system runs through each grid
-position and constructs a 'best' flooding map from the time-series of
-data in each grid patch. These are then merged into a single file
-using a spatial disolve operartion.
+position and constructs a 'best' flooding raster map from the
+time-series of data in each grid patch. The resultant maps are then
+merged into larger rasters, before the water masks are vectorised.
 
 The following command is used to perform the time-aggregation and
 spatial merge:

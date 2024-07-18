@@ -64,8 +64,8 @@ structures on this remote disk. The directory tree is laid out as follows:
      ├─ 1_Staging                  ... Mapping Operations
      │  │
      │  ├─ GRID                    ... Raw Data & Intermediate Maps
-     │  │   └─ GRID00001
-     │  │   └─ GRID00002
+     │  │   └─ G_10_844_577
+     │  │   └─ G_10_844_578
      │  │   └─ ...
      │  │
      │  └─ operational             ... Session Information & Merged Maps

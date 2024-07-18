@@ -1,8 +1,6 @@
 --
 -- SCHEMA FOR THE FLOODMAPPER DATABASE
 --
--- LAST MODIFIED 2023-03-15
---
 
 
 SET statement_timeout = 0;
@@ -78,7 +76,7 @@ CREATE TABLE public.lgas_info (
     loci_uri21 character varying,
     shape_leng real,
     shape_area real,
-    geometry_col public.geometry(Geometry,25832),
+    geometry_col public.geometry(Geometry, 4326),
     PRIMARY KEY (lga_name22)
 );
 
@@ -92,8 +90,6 @@ CREATE TABLE public.session_info (
     session character varying(50) NOT NULL,
     flood_date_start date NOT NULL,
     flood_date_end date NOT NULL,
-    ref_date_start date,
-    ref_date_end date,
     bucket_uri character varying(50),
     PRIMARY KEY(session)
 );
