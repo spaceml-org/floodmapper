@@ -2,10 +2,6 @@
 
 ## History and Philosophy of ML4Floods
 
-<p align="center">
-    <img src="https://raw.githubusercontent.com/spaceml-org/floodmapper/cormac_devel/tutorial/documents/Trillium_Flooding_Research.png" alt="Trillium Research" width="70%">
-</p>
-
 Trillium has been conducting research into flooding since 2019, as part
 of the [FDL USA](https://frontierdevelopmentlab.org/) and [FDL
 Europe](https://fdleurope.org/) programs. The ML4Floods Toolbox
@@ -40,7 +36,7 @@ The system makes use of the following external services:
 
  * [Google Cloud Platform](https://cloud.google.com/) (GCP) - for
    storing data in a storage bucket and recording metadata in a database.
- 
+
  * [Google Earth Engine](https://earthengine.google.com/) (GEE) - for
    accessing recent satellite data and geographic information.
 
@@ -54,7 +50,7 @@ and provide an overview of how to create a flood-extent map.
 ### The GCP Bucket - Data Storage
 
 Almost all data products (including intermediate and final data) are
-stored on a GCP bucket, so it is important to understand the 
+stored on a GCP bucket, so it is important to understand the
 structures on this remote disk. The directory tree is laid out as follows:
 
 ```
@@ -91,7 +87,8 @@ There are two important high-level directories:
  * ```1_Staging``` holds the downloaded imagery and processed data.
 
 Both raw imagery and processed flood-extent maps for *individual grid
-positions and satellite passes* are stored under the ```1_Staging/GRID```
+positions and per individual satellite passes* (i.e., the lowest spatial
+and temporal unit of data) are stored under the ```1_Staging/GRID```
 directory. These intermediate products are available for use in any
 mapping session that requires them, avoiding unnecessary
 re-processing or downloads.
@@ -113,9 +110,8 @@ running on GCP, such as images being downloaded and the status of
 mapping operations, without having to resort to Google Earth Engine
 calls.
 
- * DB Schema Diagram: [PNG](documents/floodmapper-db_schema.png)
- * DB Tables Description [README](documents/FloodMapper-DB_Description.md)
-
+ * DB Tables Description [README](documents/FloodMapper-DB_Description.md).
+ **TODO: UPDATE.**
 
 ## The Processing Machine - Command and Control
 
@@ -131,31 +127,33 @@ The steps to create a flood-extent map are as follows:
 
  1. Query and parse event information from the Copernicus EMS Page (optional).
  1. Choose a spatial area of interest (AoI) to map.
- 1. Query and visualise the availible Sentinel-2 (S2) and Landsat data.
  1. Decide on a time-range to search for satellite data.
+ 1. Query and visualise the availible Sentinel-2 (S2) and Landsat data.
  1. Decide on filtering criteria for the images:
     * Acceptible percentage of clouds.
     * Acceptible percentage overlap of image with AOI.
  1. Start downloading data to the bucket via GEE.
-    * Images are downloaded based on grid positions.
-    * Images are filtered by cloud cover and overlap with AoI.
+    * Images are downloaded based on the grid positions defined in the
+    FloodMapper DB (referred to as 'patches').
+    * Images are filtered by cloud cover and overlap with the AoI.
  1. Monitor the progress of the GEE download tasks.
  1. Decide on the ML model to use (currently only one choice for S2
     and Landsat).
  1. Start the mapping task.
-    * Flood-extent maps are created for each grid image.
+    * Flood-extent maps are created for each grid image using the
+      *WorldFloods* segmentation model.
     * Each grid position may contain a time-series of images, corresponding
       to individual satellite passes.
-    * Maps are created raster-masks with cloud/land/water/flood-trace classes
-      however, these are converted into polygons for later processing.
+    * Raster-masks with cloud/land/water/flood-trace classes are created
+      for each grid image.
  1. Merge the individual maps into a final data product:
-    * Collapse each time-series into a single map per-grid-position.
-    * Merge the flood-extent maps for each grid into a single map.
-    * Write to a final GeoJSON or GeoPackage file on the bucket.
+    * Collapse each time-series into a single raster-mask per-grid-position.
+    * Merge the raster-masks for each grid position onto larger tiles.
+    * Write each tile to a final GeoJSON or GeoPackage file on the bucket.
  1. Visualise and validate the map in selected areas.
  1. Analyse the statistics of the map.
 
-Later in the training, we will go through the mapping procedure from
+Later in the tutorial, we will go through the mapping procedure from
 start to finish.
 
 ---

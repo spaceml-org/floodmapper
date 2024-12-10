@@ -139,7 +139,7 @@ def calc_maximal_floodraster(geojsons_lst, head_dict, verbose=False):
                     # Flood_trace accumulates, except where it converts to water
                     flood_trace += (band1 == 4)
                     flood_trace = np.where(water, False, flood_trace)
-                    # Cloud accumulates in a bitwide AND sense
+                    # Cloud accumulates in a bitwise AND sense
                     cloud = (cloud & (band1 == 3))
                     # Valid data accumulates as a maximum extent
                     valid += (band1 != 0)

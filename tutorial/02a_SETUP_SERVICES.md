@@ -203,8 +203,8 @@ server on GCP:
  1. For starting configuration, choose **Development** for low use or
  **Production** for critical applications.
 
- 1. Set the Region to 'australia-southeast1' and choose **Single Zone**
- for availability.
+ 1. Set the Region to a nearby geography (e.g., 'australia-southeast1')
+    and choose **Single Zone** for availability.
 
  1. Click **Show Configuration Options** to expand the configuration
  options.
@@ -232,7 +232,7 @@ database on the server:
 
  1. Click on  **Create Database**.
 
- 1. Enter a database name and click **Create** (e.g., floodmapper-db).
+ 1. Enter a database name (e.g., floodmapper-db) and click **Create**.
 
 
 We will configure and initialise the database after creating the

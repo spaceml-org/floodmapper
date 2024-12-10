@@ -202,75 +202,19 @@ def load_inference_function(
 
 def check_exist(db_conn, image_id, model_id):
     """
-    Check if the vector prediction exists in the database inference table.
+    Check if the raster prediction exists in the database inference table.
     """
     query = (f"SELECT status, data_path FROM inference "
              f"WHERE image_id = %s "
              f"AND model_id = %s "
              f"AND mode = %s ;")
-    data = (image_id, model_id, "vect")
+    data = (image_id, model_id, "pred")
     df = db_conn.run_query(query, data, fetch=True)
     if len(df) > 0:
         row = df.iloc[0]
         if row.status == 1 and pd.notna(row.data_path):
             return True
     return False
-
-
-def vectorize_outputv1(prediction: np.ndarray,
-                       crs: Any,
-                       transform: rasterio.Affine,
-                       border:int=2) -> Optional[gpd.GeoDataFrame]:
-    """
-    Convert a raster mask into a vectorised GeoDataFrame.
-
-    Args:
-        prediction: (H, W) array with 4 posible values [0: "invalid",
-                    2: "water", 3: "cloud", 4: "flood_trace"]
-        crs:        coordinate reference system
-        transform:  transformation matrix
-        border:     set border pixels to zero
-
-    Returns:
-        GeoDataFrame with vectorised masks
-    """
-    data_out = []
-    start = 0
-    class_name = {0: "area_imaged", 2: "water", 3: "cloud", 4: "flood_trace"}
-    # Dilate invalid mask
-    invalid_mask = binary_dilation(prediction == 0, disk(3)).astype(bool)
-
-    # Set borders to zero to avoid border effects when vectorizing
-    prediction[:border,:] = 0
-    prediction[:, :border] = 0
-    prediction[-border:, :] = 0
-    prediction[:, -border:] = 0
-    prediction[invalid_mask] = 0
-
-    # Loop through the mask classes
-    for c, cn in class_name.items():
-        if c == 0:
-            # To remove stripes in area imaged
-            mask = prediction != c
-        else:
-            mask = prediction == c
-
-        geoms_polygons = \
-            postprocess.get_water_polygons(mask, transform=transform)
-        if len(geoms_polygons) > 0:
-            data_out.append(gpd.GeoDataFrame(
-                {"geometry": geoms_polygons,
-                 "id": np.arange(start, start + len(geoms_polygons)),
-                 "class": cn},
-                crs=crs))
-        start += len(geoms_polygons)
-
-    if len(data_out) == 1:
-        return data_out[0]
-    elif len(data_out) > 1:
-        return pd.concat(data_out, ignore_index=True)
-
-    return None
 
 
 @torch.no_grad()
@@ -369,12 +313,6 @@ def main(session_code: str,
              f"AND ((date >= %s "
              f"AND date <= %s) );")
     data = [collection_name, tuple(aois_list), flood_start_date, flood_end_date]
-    #if ref_start_date is not None and ref_end_date is not None:
-    #    query += (f"OR (date >= %s "
-    #              f"AND date <= %s));")
-    #    data += [ref_start_date, ref_end_date]
-    #else:
-    #    query += (f");")
     img_df = db_conn.run_query(query, data, fetch = True)
     num_rows = len(img_df)
     print(f"[INFO] Entries for {num_rows} downloaded images in the DB.")
@@ -424,7 +362,7 @@ def main(session_code: str,
               f"\tModel Name: {experiment_name}\n"
               f"\tTimestamp:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-        # Skip existing images, unless overwrite flag is True
+        # Skip existing vector predictions, unless overwrite flag is True
         if not overwrite and check_exist(db_conn, image_id, experiment_name):
             tq.write(f"\tResult already exists in database ... skipping.")
             tq.write(f"\tUse '--overwrite' flag to force overwrite.")
@@ -449,7 +387,7 @@ def main(session_code: str,
             pred_cont = pred_cont.cpu().numpy()
             tq.write("OK")
 
-            # Save prediction to bucket as COG GeoTIFF
+            # Save prediction mask to bucket as COG GeoTIFF
             profile = {"crs": crs,
                        "transform": transform,
                        "RESAMPLING": "NEAREST",
@@ -501,31 +439,6 @@ def main(session_code: str,
                                 "cont",
                                 status=1,
                                 data_path=filename_save_cont)
-
-            # Convert the mask to vector polygons
-            tq.write("\tVectorising prediction ... ", end="")
-            data_out = vectorize_outputv1(prediction, crs, transform)
-            tq.write("OK")
-            if data_out is not None:
-                if not filename_save_vect.startswith("gs"):
-                    os.makedirs(os.path.dirname(filename_save_vect),
-                                exist_ok=True)
-                utils.write_geojson_to_gcp(filename_save_vect, data_out)
-                tq.write(f"\tSaved vectors to:\n\t{filename_save_vect}")
-            else:
-                tq.write("\t[WARN] Vector data was NONE.")
-
-            # Update the database with a successful result
-            tq.write(f"\tUpdating database with successful result.")
-            do_update_inference(db_conn,
-                                image_id,
-                                patch_name,
-                                satellite,
-                                date,
-                                model_id,
-                                "vect",
-                                status=1,
-                                data_path=filename_save_vect)
 
         except Exception:
             tq.write("\n\t[ERR] Processing failed!\n")

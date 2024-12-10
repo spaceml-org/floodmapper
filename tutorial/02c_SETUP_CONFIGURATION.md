@@ -101,16 +101,19 @@ address' from the 'Overview' page.
      ```
      floodmapper-db=> \dt
                     List of relations
-      Schema |       Name        | Type  |  Owner
+                    List of relations
+      Schema |       Name        | Type  |  Owner   
      --------+-------------------+-------+----------
-      public | grid_loc          | table | postgres
+      public | gee_task_tracker  | table | postgres
       public | image_downloads   | table | postgres
-      public | lgas_info         | table | postgres
       public | inference         | table | postgres
+      public | lgas_info         | table | postgres
       public | postproc_spatial  | table | postgres
       public | postproc_temporal | table | postgres
+      public | session_info      | table | postgres
+      public | session_patches   | table | postgres
       public | spatial_ref_sys   | table | postgres
-     (7 rows)
+      public | world_grid        | table | postgres
      ```
 
 You can also connect and manage the database through a client such as
@@ -187,10 +190,11 @@ Australian Local Government Areas (LGAs).
 
 Note that most LGAs are much too large to map in one go. Instead the
 system divides areas of interest into a regular grid of square
-'patches', stored in the ```grid_loc``` table. The following notebook
-is used to create or extend the grid within the database:
+'patches', stored in the ```world_grid``` table, and based on the
+'slippy tile' standard used across the web. The following notebook
+is used to create, or extend, the grid within the database:
 
- * [02b_Create_Grid_Tables.ipynb](02b_Create_Grid_Tables.ipynb)
+ * [02b_Generate_World_Grid.ipynb](02b_Generate_World_Grid.ipynb)
 
 
 Congratulations - you have finished setting up the FloodMapper system!

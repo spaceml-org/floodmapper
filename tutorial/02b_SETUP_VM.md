@@ -81,7 +81,7 @@ SSH terminal:
      cd floodmapper/tutorial
      conda env create -f floodmapper.yml -n floodmapper
      ```
-     This will take a a few minutes to run - now is a good time to
+     This will take a few minutes to run - now is a good time to
      take a tea break!
 
  1. Activate the new environment as a test:
@@ -97,7 +97,6 @@ following command in the SSH terminal:
 ```
 conda env update --name floodmapper --file floodmapper.yml --prune
 ```
-
 
 However, most of our interaction with the processing machine will be
 through [Jupyter Lab](https://jupyter.org/), which we will start now.

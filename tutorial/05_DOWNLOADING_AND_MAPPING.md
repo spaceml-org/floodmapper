@@ -12,7 +12,7 @@ page](https://code.earthengine.google.com/tasks).
 
 Like in the Jupyter notebooks, the download script loads the
 environment from the hidden ```.env``` file in the FloodMapper
-installation directory - check now the the
+installation directory - check that the
 ```GOOGLE_APPLICATION_CREDENTIAL``` entry is pointing to the correct
 key file and that the ```GS_USER_PROJECT``` is correct. If you are
 running the script on a local machine, you may also need to run the
@@ -23,18 +23,17 @@ Sydney and Newcastle during July 2022: the EMSR586 activation. We
 previously extracted information on this event from the Copernicus EMS
 web pages, resulting in a list of affected LGAs. We also visualised
 the Sentinel-2 and Landsat imagery to determine the best date-ranges
-to capture both pre- and post-flood conditions.
+to capture the post-flood conditions.
 
 The steps perormed by the download script ```01_download_images.py``` are:
 
  * Read a list of processing patches saved to a GeoJSON file locally.
- * Query GEE for Sentinel-2 and Landsat data during the flooding event
-   and at an optional reference time.
+ * Query GEE for Sentinel-2 and Landsat data during the flooding event.
  * Determine cloud probability masks from archive data.
  * Filter the available imagery using cloud-cover threholds and
    blank-pixel threholds.
  * Submit image download tasks to GEE for execution in the Cloud.
- * Track image download progress in the database.
+ * Track the image download progress in the database.
  * Download the latest permanent water layers from the GEE archive.
 
 To start the download process, execute the following command in a
@@ -86,7 +85,7 @@ segmentation masks - one assessing cloudy/clear conditions and the
 other for classifying water/land. The models have been trained and
 evaluated on a recently developed *global* dataset of flooding imagery
 called *WorldFloods* (see paper in [Nature Scientific
-Reports](https://www.nature.com/articles/s41598-021-86650-z/]) for
+Reports](https://doi.org/10.1038/s41598-023-47595-7]) for
 details).
 
 There are currently two available public models:
@@ -146,10 +145,12 @@ The inference task can be started by executing the following
 command from a terminal:
 
 ```
-# Start mapping using the gridded AoI filefor the session
+# Start mapping using the gridded AoI filefor the session.
+# Change 'cuda' to 'mps' for Apple silicon.
 python 02_run_inference.py \
     --session-code EMSR586 \
     --model-name WF2_unet_rbgiswirs \
+    --device-name mps \
     --path-env-file ../.env \
     --distinguish-flood-traces \
     --overwrite
@@ -162,11 +163,10 @@ better sensitivity.
 
 
 At this point, each valid grid position in the GCP bucket contains
-raster maps of water and cloud probability, alongside vectorised
-versions of these that have been created by applying a threshold
-operations. Each satellite overpass gives rise to a map, meaning that
-there may be a time-series of maps for each grid patch (depending on
-how many times the satellites passed over).
+raster maps of water and cloud probability. Each satellite overpass
+gives rise to a map, meaning that there may be a time-series of maps
+for each grid patch (depending on how many times the satellites 
+passed over).
 
 
 ```
@@ -180,7 +180,7 @@ how many times the satellites passed over).
       │  ├─ Landsat                   ... Downloaded Landsat imagery
       │  │
       │  │
-      │  └─ WF2_unet_rbgiswirs_vec    ... Vectorised model predictions
+      │  └─ WF2_unet_rbgiswirs_vec    ... Raster model predictions
       │     ├─ Landsat
       │     │
       │     └─ S2
@@ -198,7 +198,7 @@ how many times the satellites passed over).
 ## Running the Post-Processing Steps
 
 During the post-processing step, the system runs through each grid
-position and constructs a 'best' flooding raster map from the
+position and constructs a maximum-extent flooding raster map from the
 time-series of data in each grid patch. The resultant maps are then
 merged into larger rasters, before the water masks are vectorised.
 
@@ -213,12 +213,33 @@ python 03_run_postprocessing.py \
     --overwrite
 ```
 
-After the script has completed, the final maps will be available on
-the GCP bucket under the ```operational/<SESSION_NAME>``` folder. The
-script produces a flood-extent map and (optionally) an inundation map
-showing the difference between the flood and water in a reference
-image.
+After the script has completed, the final flood-extent map will be 
+available on the GCP bucket under the ```operational/<SESSION_NAME>``` 
+folder. The script can also write a flood-extent map to a local
+directory in the GeoPackage format. Turn this behaviour on by 
+specifying the ```--save-gpkg```flag on the command line.
 
+## Experimental: Making Local Tiles
+
+It is often easier to load large maps as a series of smaller tiles. In
+this case, FloodMapper provides a script to save these tiles onto a
+local directory on the processing machine. The tiles are referenced to
+the 'slippy tiles' standard at zoom level 9 (one level up from the
+processing tiles, which are at level 10) and named for their unique
+quadkey.
+
+```
+# Create 
+python 04_create_tiles.py \
+    --session-code EMSR586 \
+    --path-env-file ../.env
+```
+
+The output tiles are available at:
+
+```
+./flood-activations/EMSR586/Flood_Tiles/
+```
 
 ---
 

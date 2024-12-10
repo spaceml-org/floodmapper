@@ -39,8 +39,8 @@ functions in the ML4Floods Toolkit:
  * [03a_Extract_EMSR586.ipynb](03a_Extract_EMSR586.ipynb)
 
 At the end of this notebook we will write polygonal areas of interest
-to a GeoJSON file on our local disk. These will outline the areas we
-wish to map.
+to a GeoJSON file on our local disk. These correspond to the overlapping
+FloodMapper grid patches covering the area we wish to map
 
 
 ## Preparing a gridded AoI file
